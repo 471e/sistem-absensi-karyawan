@@ -1,0 +1,1775 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pusat Cetak & Export Data</title>
+    <script src="vendor/tailwindcss.js"></script>
+    <script crossorigin src="vendor/react.production.min.js"></script>
+    <script crossorigin src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/lucide.js"></script>
+    <!-- SheetJS for Excel -->
+    <script src="vendor/xlsx.full.min.js"></script>
+    <!-- html2pdf for PDF -->
+    <script src="vendor/html2pdf.bundle.min.js"></script>
+    <style>
+        body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif; background-color: #f8fafc; }
+        
+        /* Print Styles */
+        @media print {
+            /* Hide everything by default */
+            body * {
+                visibility: hidden;
+            }
+            
+            /* Show only the print area and its children */
+            #print-area, #print-area * {
+                visibility: visible;
+            }
+
+            /* Position the print area to top-left, ignoring all layout */
+            #print-area {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 5mm 10mm 5mm 10mm !important; /* Reduced Margins: 0.5cm Top/Bottom */
+                background: white !important;
+                box-shadow: none !important;
+                border: none !important;
+                z-index: 9999;
+            }
+
+            #print-area.landscape {
+                padding: 5mm 6mm 5mm 6mm !important;
+            }
+
+            /* Reset body/html */
+            html, body {
+                background: white !important;
+                height: 100%;
+                overflow: visible !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            /* Utilities */
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            .page-break { page-break-before: always; }
+            
+            /* Table & Content Styling */
+            table { width: 100% !important; border-collapse: collapse !important; font-size: 11px; }
+            th, td { border: 1px solid #000 !important; padding: 4px 6px !important; color: black !important; }
+            thead { background-color: #f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+            table.rekap-table { table-layout: fixed !important; font-size: 9px !important; }
+            table.rekap-table th, table.rekap-table td { padding: 1px 2px !important; }
+
+            /* Page Break Control */
+            .break-inside-avoid, tr, td, th {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+            }
+
+            /* Remove browser margins */
+            @page { margin: 0; size: auto; }
+        }
+
+        /* Screen Preview of Paper */
+        .paper-preview {
+            background: white;
+            box-shadow: 0 0 15px rgba(0,0,0,0.3);
+            margin: 20px auto;
+            position: relative;
+            box-sizing: border-box;
+        }
+        
+        /* Official Sizes for Screen */
+        .paper-A4 { 
+            width: 210mm; 
+            min-height: 297mm; 
+            padding: 5mm 10mm 5mm 10mm; 
+        }
+        .paper-A4.landscape { 
+            width: 297mm; 
+            min-height: 210mm; 
+        }
+        .paper-F4 { 
+            width: 215mm; 
+            min-height: 330mm; 
+            padding: 5mm 10mm 5mm 10mm; 
+        }
+        .paper-F4.landscape { 
+            width: 330mm; 
+            min-height: 215mm; 
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script>
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        const DEFAULT_EMPLOYEES = [
+            { "id": "AM2-001", "name": "Sahirudin, S.Kel", "workUnit": "Kantor Cabang", "role": "Kepala Cabang", "password": "123", "gender": "L", "phone": "081234567890", "email": "sahirudin@example.com", "address": "Jl. Contoh No. 1", "joinDate": "2020-01-01", "nik": "3201010101010001", "npp": "19800101 200001 1 001", "golongan": "III/a", "pangkat": "Penata Muda", "masaKerja": "5 Tahun" },
+            { "id": "AM2-002", "name": "Yuniar Ridwan", "workUnit": "Kantor Cabang", "role": "Kepala Operator Distribusi", "password": "123", "gender": "P", "phone": "081234567891", "email": "yuniar@example.com", "address": "Jl. Contoh No. 2", "joinDate": "2020-02-01", "nik": "3201010101010002", "npp": "NPP-002", "golongan": "III/b", "pangkat": "Penata Muda Tk. I", "masaKerja": "4 Tahun" },
+            { "id": "AM2-003", "name": "Aji Bayu Leksono", "workUnit": "Kantor Cabang", "role": "Kepala Operator Adm. & Keuangan", "password": "123", "gender": "L", "phone": "081234567892", "email": "aji@example.com", "address": "Jl. Contoh No. 3", "joinDate": "2020-03-01", "nik": "3201010101010003", "npp": "NPP-003", "golongan": "III/c", "pangkat": "Penata", "masaKerja": "3 Tahun" },
+            { "id": "AM2-004", "name": "Abdul Latif Karim", "workUnit": "Kantor Cabang", "role": "Pelaksana Intek & IPA", "password": "123", "gender": "L", "phone": "081234567893", "email": "latif@example.com", "address": "Jl. Contoh No. 4", "joinDate": "2020-04-01", "nik": "3201010101010004", "npp": "NPP-004", "golongan": "II/a", "pangkat": "Pengatur Muda", "masaKerja": "2 Tahun" },
+            { "id": "AM2-005", "name": "Abdul Salam Rasai", "workUnit": "Kantor Cabang", "role": "Pelaksana Distribusi & Penyambungan", "password": "123", "gender": "L", "phone": "081234567894", "email": "salam@example.com", "address": "Jl. Contoh No. 5", "joinDate": "2020-05-01", "nik": "3201010101010005", "npp": "NPP-005", "golongan": "II/b", "pangkat": "Pengatur Muda Tk. I", "masaKerja": "2 Tahun" },
+            { "id": "AM2-006", "name": "Muhammad Afandi Ahmad", "workUnit": "Kantor Cabang", "role": "Pelaksana Rekening & Penagihan", "password": "123", "gender": "L", "phone": "081234567895", "email": "afandi@example.com", "address": "Jl. Contoh No. 6", "joinDate": "2020-06-01", "nik": "3201010101010006", "npp": "NPP-006", "golongan": "II/c", "pangkat": "Pengatur", "masaKerja": "1 Tahun" },
+            { "id": "AM2-007", "name": "Zulkifli Dukomalamo", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "L", "phone": "081234567896", "email": "zulkifli@example.com", "address": "Jl. Contoh No. 7", "joinDate": "2020-07-01", "nik": "3201010101010007", "npp": "NPP-007", "golongan": "I/a", "pangkat": "Juru Muda", "masaKerja": "1 Tahun" },
+            { "id": "AM2-008", "name": "Faisal Malik", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "L", "phone": "081234567897", "email": "faisal@example.com", "address": "Jl. Contoh No. 8", "joinDate": "2020-08-01", "nik": "3201010101010008", "npp": "NPP-008", "golongan": "I/b", "pangkat": "Juru Muda Tk. I", "masaKerja": "1 Tahun" },
+            { "id": "AM2-009", "name": "Fitriyani S. Rajabessy", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "P", "phone": "081234567898", "email": "fitriyani@example.com", "address": "Jl. Contoh No. 9", "joinDate": "2020-09-01", "nik": "3201010101010009", "npp": "NPP-009", "golongan": "I/c", "pangkat": "Juru", "masaKerja": "1 Tahun" }
+        ];
+
+        // --- DATA DUMMY SIMULASI REMOVED ---
+
+
+        const DB = {
+            getEmployees: () => {
+                const data = JSON.parse(localStorage.getItem('employees_data') || "[]");
+                if (data.length === 0) return DEFAULT_EMPLOYEES;
+                return data;
+            },
+            getAttendance: () => {
+                // Combine real localStorage data with our Simulation Dummy Data
+                const realData = JSON.parse(localStorage.getItem('attendance_records') || "[]");
+                return realData;
+            },
+        };
+
+        const ENDPOINT_KEY = "absensi_endpoint_v1";
+
+        function buildEndpointUrl(baseUrl, params) {
+            const base = (baseUrl || "").trim();
+            if (!base) return "";
+            const query = Object.entries(params || {})
+                .filter(([_, v]) => v !== undefined && v !== null && String(v).length > 0)
+                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+                .join("&");
+            if (!query) return base;
+            return base.includes("?") ? `${base}&${query}` : `${base}?${query}`;
+        }
+
+        async function jsonpRequest(url, params, { timeoutMs = 12000, retries = 2 } = {}) {
+            const doRequest = () => new Promise((resolve, reject) => {
+                const callbackName = `__absensi_jsonp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+                const fullUrl = buildEndpointUrl(url, { ...(params || {}), callback: callbackName });
+                if (!fullUrl) {
+                    reject(new Error("URL kosong"));
+                    return;
+                }
+
+                let settled = false;
+                const cleanup = () => {
+                    try { delete window[callbackName]; } catch (_) { window[callbackName] = undefined; }
+                    if (script && script.parentNode) script.parentNode.removeChild(script);
+                    if (timer) clearTimeout(timer);
+                };
+
+                window[callbackName] = (data) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    resolve(data);
+                };
+
+                const script = document.createElement("script");
+                script.src = fullUrl;
+                script.async = true;
+                script.onerror = () => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    reject(new Error("Gagal memuat data dari server"));
+                };
+
+                const timer = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    reject(new Error("Timeout mengambil data dari server"));
+                }, timeoutMs);
+
+                document.head.appendChild(script);
+            });
+
+            let lastError;
+            for (let i = 0; i <= retries; i++) {
+                try {
+                    return await doRequest();
+                } catch (e) {
+                    lastError = e;
+                    if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+                }
+            }
+            throw lastError;
+        }
+
+        function mergeByKey(local, remote, key = "id") {
+            const map = new Map();
+            local.forEach(item => map.set(item[key], item));
+            remote.forEach(item => map.set(item[key], { ...map.get(item[key]), ...item }));
+            return Array.from(map.values());
+        }
+
+        function recordKey(r) {
+            if (!r) return "";
+            return r.recordId || r.id || `${r.employeeId || ""}_${r.timestamp || ""}_${r.type || ""}`;
+        }
+
+        function mergeAttendance(localArr, remoteArr) {
+            const out = [];
+            const map = new Map();
+            (Array.isArray(localArr) ? localArr : []).forEach((r) => {
+                const k = recordKey(r);
+                if (!k) return;
+                map.set(k, r);
+            });
+            (Array.isArray(remoteArr) ? remoteArr : []).forEach((r) => {
+                const k = recordKey(r);
+                if (!k) return;
+                map.set(k, { ...map.get(k), ...r, recordId: k });
+            });
+            map.forEach((v) => out.push(v));
+            out.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            return out;
+        }
+
+        const fixSheetDate = (isoStr) => {
+            if (!isoStr || isoStr === "-" || isoStr === "null") return "";
+            try {
+                const d = new Date(isoStr);
+                if (isNaN(d.getTime())) return isoStr;
+                d.setHours(d.getHours() + 12);
+                return d.toISOString().slice(0, 10);
+            } catch (e) {
+                return isoStr;
+            }
+        };
+
+        async function pullFromSheetAndMerge() {
+            const baseUrl = localStorage.getItem(ENDPOINT_KEY);
+            if (!baseUrl) return { ok: false, reason: "no-endpoint" };
+            if (typeof navigator !== "undefined" && navigator.onLine === false) return { ok: false, reason: "offline" };
+
+            const data = await jsonpRequest(baseUrl, { action: "export" });
+            const isSuccess = !!(data && (data.ok === true || data.status === "success"));
+            if (!isSuccess) return { ok: false, reason: "bad-response" };
+
+            if (Array.isArray(data.employees)) {
+                const local = DB.getEmployees();
+                const normalizedEmployees = mergeByKey(local, data.employees).map(e => ({
+                    ...e,
+                    joinDate: fixSheetDate(String(e.joinDate || "")),
+                    npp: String(e.npp || ""),
+                    golongan: String(e.golongan || ""),
+                    pangkat: String(e.pangkat || ""),
+                    masaKerja: String(e.masaKerja || ""),
+                    birthPlace: String(e.birthPlace || ""),
+                    birthDate: fixSheetDate(String(e.birthDate || "")),
+                    religion: String(e.religion || ""),
+                    maritalStatus: String(e.maritalStatus || ""),
+                    status: String(e.status || "Kontrak"),
+                    photoUrl: String(e.photoUrl || "")
+                })).filter((e) => e.id);
+                if (normalizedEmployees.length > 0) localStorage.setItem('employees_data', JSON.stringify(normalizedEmployees));
+            }
+
+            if (Array.isArray(data.attendance)) {
+                const local = DB.getAttendance();
+                const merged = mergeAttendance(local, data.attendance);
+                localStorage.setItem('attendance_records', JSON.stringify(merged));
+            }
+
+            if (data.settings && typeof data.settings === "object") {
+                const local = getSystemSettings();
+                const remote = data.settings || {};
+                const mergedSettings = {
+                    ...local,
+                    ...remote,
+                    kopSurat: { ...local.kopSurat, ...(remote.kopSurat || {}) },
+                    kantor: { ...local.kantor, ...(remote.kantor || {}) }
+                };
+                saveSystemSettings(mergedSettings);
+            }
+
+            return { ok: true, serverTime: data.serverTime || "" };
+        }
+
+        const SETTINGS_KEY = "absensi_system_settings_v1";
+
+        const DEFAULT_SETTINGS = {
+            kopSurat: {
+                line1: "TIPE PERUSAHAAN",
+                line2: "NAMA PERUSAHAAN",
+                line3: "NAMA KOTA/KABUPATEN",
+                line4: "NAMA KANTOR UNIT/CABANG",
+                line5: "ALAMAT PERUSAHAAN",
+                line6: "NO. TELP/HP DAN EMAIL"
+            },
+            kantor: {
+                tipe: "Cabang",
+                nama: "Kantor Cabang",
+                address: "",
+                lat: "",
+                lng: "",
+                radiusM: "200"
+            },
+            penandatangan: {
+                kota: "Ternate",
+                tanggal: "",
+                jabatan1: "Kepala Cabang",
+                nama1: "SAHIRUDIN, S.Kel",
+                nip1: "NPP. 19800101 200001 1 001",
+                jabatan2: "Pejabat Lain",
+                nama2: "Nama Pejabat",
+                nip2: "NPP. -",
+                jabatan3: "Pejabat Lainnya",
+                nama3: "Nama Pejabat",
+                nip3: "NPP. -"
+            },
+            denda: {
+                terlambat: 20000,
+                pulangCepat: 10000,
+                alpa: 100000
+            }
+        };
+
+        function getSystemSettings() {
+            try {
+                const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null");
+                if (!raw || typeof raw !== "object") return DEFAULT_SETTINGS;
+                const rawKop = (raw && raw.kopSurat && typeof raw.kopSurat === "object") ? raw.kopSurat : {};
+                const hasNewLines = ["line3", "line4", "line5", "line6"].some((k) => rawKop[k] !== undefined && rawKop[k] !== null && String(rawKop[k]).trim().length > 0);
+                const migratedKop = hasNewLines ? {
+                    line1: String(rawKop.line1 || DEFAULT_SETTINGS.kopSurat.line1),
+                    line2: String(rawKop.line2 || DEFAULT_SETTINGS.kopSurat.line2),
+                    line3: String(rawKop.line3 || rawKop.city || DEFAULT_SETTINGS.kopSurat.line3),
+                    line4: String(rawKop.line4 || rawKop.unit || DEFAULT_SETTINGS.kopSurat.line4),
+                    line5: String(rawKop.line5 || rawKop.address || DEFAULT_SETTINGS.kopSurat.line5),
+                    line6: String(rawKop.line6 || [rawKop.phone, rawKop.email].filter(Boolean).join(" | ") || DEFAULT_SETTINGS.kopSurat.line6)
+                } : {
+                    line1: String(DEFAULT_SETTINGS.kopSurat.line1),
+                    line2: String(rawKop.line1 || DEFAULT_SETTINGS.kopSurat.line2),
+                    line3: String(rawKop.city || DEFAULT_SETTINGS.kopSurat.line3),
+                    line4: String(rawKop.line2 || rawKop.unit || DEFAULT_SETTINGS.kopSurat.line4),
+                    line5: String(rawKop.address || DEFAULT_SETTINGS.kopSurat.line5),
+                    line6: String([rawKop.phone, rawKop.email].filter(Boolean).join(" | ") || DEFAULT_SETTINGS.kopSurat.line6)
+                };
+                return {
+                    ...DEFAULT_SETTINGS,
+                    ...raw,
+                    kopSurat: migratedKop,
+                    kantor: { ...DEFAULT_SETTINGS.kantor, ...(raw.kantor || {}) },
+                    penandatangan: { ...DEFAULT_SETTINGS.penandatangan, ...(raw.penandatangan || {}) },
+                    denda: { ...DEFAULT_SETTINGS.denda, ...(raw.denda || {}) }
+                };
+            } catch (_) {
+                return DEFAULT_SETTINGS;
+            }
+        }
+
+        function saveSystemSettings(settings) {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        }
+
+        const formatDate = (dateString, defaultToNow = false) => {
+            if (!dateString || dateString === '-' || dateString === 'null') {
+                if (defaultToNow) return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                return '-';
+            }
+            try {
+                const date = new Date(dateString);
+                if (isNaN(date.getTime())) {
+                    if (defaultToNow) return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                    return dateString;
+                }
+                return date.toLocaleDateString('id-ID', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric'
+                });
+            } catch (e) {
+                if (defaultToNow) return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                return dateString;
+            }
+        };
+
+        // Formal Header Component
+        const PrintHeader = ({ settings }) => {
+            const kop = (settings && settings.kopSurat) ? settings.kopSurat : DEFAULT_SETTINGS.kopSurat;
+            const line1 = String(kop.line1 || "").trim();
+            const line2 = String(kop.line2 || "").trim();
+            const line3 = String(kop.line3 || "").trim();
+            const line4 = String(kop.line4 || "").trim();
+            const line5 = String(kop.line5 || "").trim();
+            const line6 = String(kop.line6 || "").trim();
+
+            return React.createElement("div", { className: "border-b-4 border-double border-black pb-2 mb-2 flex items-center gap-4 font-serif" },
+                React.createElement("div", { className: "w-24 h-24 flex items-center justify-center" },
+                    (function(){
+                        const src = settings && settings.logo ? settings.logo : "Logo/Logo.png";
+                        const op = Number(settings && settings.logoOpacity !== undefined ? settings.logoOpacity : 1);
+                        const br = Number(settings && settings.logoBrightness !== undefined ? settings.logoBrightness : 1.05);
+                        const co = Number(settings && settings.logoContrast !== undefined ? settings.logoContrast : 0.95);
+                        return React.createElement("img", { 
+                            src,
+                            className: "w-full h-full object-contain",
+                            style: { opacity: op, filter: `brightness(${br}) contrast(${co})` },
+                            onError: (e) => {
+                                const img = e.currentTarget;
+                                if (!settings.logo) { 
+                                    img.style.display = "none";
+                                    const fallback = img.nextSibling;
+                                    if (fallback) fallback.style.display = "block";
+                                } else {
+                                    img.src = "Logo/Logo.png";
+                                }
+                            }
+                        });
+                    })(),
+                    React.createElement("div", { className: "text-xs text-center border border-gray-300 p-2 hidden" }, "Logo")
+                ),
+                React.createElement("div", { className: "flex-1 text-center" },
+                    line1 && React.createElement("h1", { className: "text-lg font-bold uppercase tracking-wide" }, line1),
+                    line2 && React.createElement("h2", { className: "text-2xl font-extrabold uppercase tracking-wider" }, line2),
+                    line3 && React.createElement("p", { className: "text-sm font-bold uppercase mt-1" }, line3),
+                    line4 && React.createElement("p", { className: "text-sm font-bold uppercase" }, line4),
+                    line5 && React.createElement("p", { className: "text-xs mt-1" }, line5),
+                    line6 && React.createElement("p", { className: "text-xs italic" }, line6)
+                )
+            );
+        };
+
+        // Formal Footer Component
+        const PrintFooter = ({ settings, signerCount, compact }) => {
+            const p = (settings && settings.penandatangan) ? settings.penandatangan : DEFAULT_SETTINGS.penandatangan;
+            const count = Number(signerCount) || 1;
+            
+            // Format date: "Ternate, 20 Oktober 2023"
+            const dateStr = formatDate(p.tanggal, true);
+
+            // Helper for signature block
+            const SignatureBlock = ({ title, name, nip, jabatan, ttdImage, isMain }) => {
+                return React.createElement("div", { className: "text-center w-64 relative" },
+                    // Header
+                    isMain && React.createElement("p", { className: "mb-1" }, `${p.kota || "Kota"}, ${dateStr}`),
+                    React.createElement("p", { className: compact ? "font-bold mb-1" : "font-bold mb-2" }, title),
+                    
+                    // Signature Space
+                    React.createElement("div", { className: `${compact ? "h-24 my-0.5" : "h-24 my-2"} flex items-center justify-center relative` },
+                        ttdImage ? 
+                            (function(){
+                                const op = (p.ttdOpacity !== undefined ? Number(p.ttdOpacity) : 0.85);
+                                const br = (p.ttdBrightness !== undefined ? Number(p.ttdBrightness) : 1.1);
+                                const co = (p.ttdContrast !== undefined ? Number(p.ttdContrast) : 0.9);
+                                return React.createElement("img", { 
+                                    src: ttdImage, 
+                                    className: "max-h-full max-w-full relative", 
+                                    style: { zIndex: 10, opacity: op, filter: `brightness(${br}) contrast(${co})` }, 
+                                    alt: "Tanda Tangan" 
+                                });
+                            })() :
+                            React.createElement("div", { className: compact ? "h-20" : "h-20" }),
+                        
+                        // Stamp Logic (Only for Main Signer)
+                        isMain && p.stempel && (function(){
+                            const op = (p.stempelOpacity !== undefined ? Number(p.stempelOpacity) : 0.8);
+                            const ox = (p.stempelOffsetX !== undefined ? Number(p.stempelOffsetX) : -140);
+                            const oy = (p.stempelOffsetY !== undefined ? Number(p.stempelOffsetY) : -50);
+                            const br = (p.stempelBrightness !== undefined ? Number(p.stempelBrightness) : 1.05);
+                            const co = (p.stempelContrast !== undefined ? Number(p.stempelContrast) : 0.95);
+                            return React.createElement("img", {
+                                src: p.stempel,
+                                className: `absolute ${compact ? "h-36 w-36" : "h-36 w-36"} object-contain z-20 pointer-events-none`,
+                                style: { left: "50%", top: "50%", transform: `translate(calc(${ox}% + 20px), ${oy}%)`, opacity: op, filter: `brightness(${br}) contrast(${co})`, zIndex: 999 },
+                                alt: "Stempel"
+                            })
+                        })()
+                    ),
+
+                    // Name & Info
+                    React.createElement("p", { className: "font-bold underline uppercase" }, name),
+                    React.createElement("p", null, nip),
+                    isMain && count > 1 && React.createElement("p", { className: "text-xs mt-1 font-bold" }, jabatan),
+                    !isMain && React.createElement("p", { className: "text-xs mt-1 font-bold" }, jabatan)
+                );
+            };
+
+            return React.createElement("div", { className: `${compact ? "mt-1" : "mt-4"} break-inside-avoid` },
+                React.createElement("div", { className: `flex ${count === 1 ? 'justify-end' : 'justify-between'} items-end` },
+                    
+                    // Left Column (Dibuat Oleh) - Pejabat 2 or 3
+                    count > 1 && React.createElement(SignatureBlock, {
+                        title: "Dibuat Oleh,",
+                        name: count === 3 ? p.nama3 : p.nama2,
+                        nip: count === 3 ? p.nip3 : p.nip2,
+                        jabatan: count === 3 ? p.jabatan3 : p.jabatan2,
+                        ttdImage: count === 3 ? p.ttd3 : p.ttd2,
+                        isMain: false
+                    }),
+
+                    // Center Column (Disetujui Oleh) - Pejabat 2 (only if 3 signers)
+                    count === 3 && React.createElement(SignatureBlock, {
+                        title: "Disetujui Oleh,",
+                        name: p.nama2,
+                        nip: p.nip2,
+                        jabatan: p.jabatan2,
+                        ttdImage: p.ttd2,
+                        isMain: false
+                    }),
+
+                    // Right Column (Utama) - Pejabat 1
+                    React.createElement(SignatureBlock, {
+                        title: count === 1 ? p.jabatan1 : (count === 2 ? "Disetujui Oleh," : "Disahkan Oleh,"),
+                        name: p.nama1,
+                        nip: p.nip1,
+                        jabatan: p.jabatan1,
+                        ttdImage: p.ttd1,
+                        isMain: true
+                    })
+                )
+            );
+        };
+
+        function App() {
+            const [activeTab, setActiveTab] = useState("rekap");
+            const [employees, setEmployees] = useState([]);
+            const [attendance, setAttendance] = useState([]);
+            const [systemSettings, setSystemSettings] = useState(getSystemSettings());
+            const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+            const [paperSize, setPaperSize] = useState("A4");
+            const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10));
+            const [reportYear, setReportYear] = useState(String(new Date().getFullYear()));
+            const [reportQuarter, setReportQuarter] = useState("1");
+            const [reportSemester, setReportSemester] = useState("1");
+            const [exportStartDate, setExportStartDate] = useState(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+            const [exportEndDate, setExportEndDate] = useState(new Date().toISOString().slice(0, 10));
+            const [signerCount, setSignerCount] = useState((getSystemSettings().penandatangan && Number(getSystemSettings().penandatangan.jumlah)) || 1);
+            const [harianViewMode, setHarianViewMode] = useState('jam');
+            const [showFines, setShowFines] = useState(false);
+            const [shiftFilter, setShiftFilter] = useState("ALL");
+
+            useEffect(() => {
+                (async () => {
+                    try { await pullFromSheetAndMerge(); } catch (_) {}
+                    setEmployees(DB.getEmployees());
+                    setAttendance(DB.getAttendance());
+                    setSystemSettings(getSystemSettings());
+                    try { 
+                        const sc = Number(getSystemSettings().penandatangan?.jumlah || 1); 
+                        setSignerCount(sc >=1 && sc <=3 ? sc : 1); 
+                    } catch (_) {}
+                    setShowFines(false);
+                })();
+            }, []);
+
+            // Helper: Parse ISO Date safely
+            const parseISODate = (str) => {
+                const d = new Date(str);
+                return isNaN(d.getTime()) ? new Date() : d;
+            };
+
+            const pad2 = (n) => String(n).padStart(2, '0');
+            const lastDayOfMonth = (y, m) => new Date(y, m, 0).getDate();
+            const formatRupiah = (angka) => {
+                return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(angka);
+            };
+
+            // Helper: Format Time to HH:mm
+            const formatTime = (val) => {
+                if (!val || val === '-') return '-';
+                try {
+                    if (typeof val === 'string' && val.match(/^\d{1,2}[:.]\d{2}/)) {
+                        return val.substring(0, 5).replace('.', ':');
+                    }
+                    const d = new Date(val);
+                    if (!isNaN(d.getTime())) {
+                        const h = String(d.getHours()).padStart(2, '0');
+                        const m = String(d.getMinutes()).padStart(2, '0');
+                        return `${h}:${m}`;
+                    }
+                } catch (e) { return String(val).substring(0, 5); }
+                return String(val).substring(0, 5);
+            };
+
+            const shiftNames = useMemo(() => {
+                const list = [];
+                const shifts = Array.isArray(systemSettings?.shifts) ? systemSettings.shifts : [];
+                shifts.forEach(sh => {
+                    const n = String(sh.name || "").trim();
+                    if (n && !list.includes(n)) list.push(n);
+                });
+                attendance.forEach(r => {
+                    const n = String(r.shift || "").trim();
+                    if (n && !list.includes(n)) list.push(n);
+                });
+                return list;
+            }, [systemSettings, attendance]);
+
+            const filteredAttendance = useMemo(() => {
+                if (shiftFilter === "ALL") return attendance;
+                const target = String(shiftFilter || "").toLowerCase();
+                return attendance.filter(r => String(r.shift || "").toLowerCase() === target);
+            }, [attendance, shiftFilter]);
+
+            const monthlyData = useMemo(() => {
+                const [y, m] = month.split("-").map(Number);
+                const daysInMonth = lastDayOfMonth(y, m);
+                const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+                const todayStr = new Date().toISOString().slice(0, 10);
+
+                const rows = employees.map(emp => {
+                    const attRecord = {};
+                    let countTerlambat = 0;
+                    let countPulangCepat = 0;
+                    let countTanpaKet = 0;
+                    let countHadir = 0;
+                    let countSakit = 0;
+                    let countIzin = 0;
+                    let countCuti = 0;
+                    let countAlpa = 0;
+                    let totalDenda = 0;
+
+                    days.forEach(d => {
+                        const dateStr = `${y}-${pad2(m)}-${pad2(d)}`;
+                        const dateObj = new Date(y, m - 1, d);
+                        const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6; // 0 Sun, 6 Sat
+                        
+                        // Find check-in and check-out for this employee and date
+                        const dayRecords = filteredAttendance.filter(r => 
+                            r.employeeId === emp.id && 
+                            r.timestamp.startsWith(dateStr)
+                        );
+                        
+                        const checkIn = dayRecords.find(r => {
+                            const t = String(r.type || '').toLowerCase();
+                            return (r.jamMasuk && String(r.jamMasuk).length > 0) || (r.typeMasuk && String(r.typeMasuk).length > 0) || t === 'check-in' || t === 'masuk';
+                        });
+                        const checkOut = dayRecords.find(r => {
+                            const t = String(r.type || '').toLowerCase();
+                            return (r.jamKeluar && String(r.jamKeluar).length > 0) || (r.typeKeluar && String(r.typeKeluar).length > 0) || t === 'check-out' || t === 'pulang';
+                        });
+                        const leaveRec = dayRecords.find(r => {
+                            const t = String(r.type || '').toLowerCase();
+                            return (r.leaveType && String(r.leaveType).length > 0) || t === 'leave' || t === 'izin' || t === 'cuti' || t === 'sakit';
+                        });
+
+                        let inTime = '-';
+                        let outTime = '-';
+                        let inStatus = '';
+                        let outStatus = '';
+                        let dailyDenda = 0;
+
+                        if (leaveRec) {
+                             const type = (leaveRec.leaveType || leaveRec.status || '').toLowerCase();
+                             inStatus = leaveRec.leaveType || 'Izin';
+                             outStatus = '-';
+                             if (type.includes('sakit')) countSakit++;
+                             else if (type.includes('cuti')) countCuti++;
+                             else countIzin++;
+                        } else if (checkIn) {
+                            if (checkIn.jamMasuk) inTime = formatTime(checkIn.jamMasuk);
+                            else inTime = formatTime(checkIn.timestamp);
+                            
+                            inStatus = checkIn.statusMasuk || checkIn.status || '';
+                            if (inStatus.toLowerCase().includes('terlambat')) {
+                                countTerlambat++;
+                                dailyDenda += (systemSettings.denda?.terlambat || 0);
+                            }
+                            countHadir++;
+                        }
+                        
+                        if (checkOut) {
+                             if (checkOut.jamKeluar) outTime = formatTime(checkOut.jamKeluar);
+                             else outTime = formatTime(checkOut.timestamp);
+                             
+                             outStatus = checkOut.statusKeluar || checkOut.status || '';
+                             if (outStatus.toLowerCase().includes('cepat')) {
+                                 countPulangCepat++;
+                                 dailyDenda += (systemSettings.denda?.pulangCepat || 0);
+                             }
+                        } else if (checkIn) {
+                            // Masuk tapi belum/lupa pulang
+                            if (dateStr < todayStr) countTanpaKet++;
+                        } else {
+                            // Tidak ada checkIn
+                            // Cek apakah Alpa (Hari kerja, sudah lewat, dan bukan libur)
+                            // Asumsi sederhana: Senin-Jumat adalah hari kerja
+                            if (dateStr < todayStr && !isWeekend) {
+                                countAlpa++;
+                                dailyDenda += (systemSettings.denda?.alpa || 0);
+                            }
+                        }
+
+                        totalDenda += dailyDenda;
+                        attRecord[d] = { in: inTime, out: outTime, inStatus, outStatus, denda: dailyDenda };
+                    });
+                    return { emp, attendance: attRecord, stats: { countHadir, countSakit, countIzin, countCuti, countTerlambat, countPulangCepat, countTanpaKet, countAlpa, totalDenda } };
+                });
+
+                return { days, data: rows };
+            }, [employees, attendance, month, systemSettings]);
+
+            const dailyData = useMemo(() => {
+                const dateStr = reportDate;
+                const dateObj = new Date(dateStr);
+                const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                const todayStr = new Date().toISOString().slice(0, 10);
+
+                    const rows = employees.map(emp => {
+                        const dayRecords = filteredAttendance.filter(r => 
+                        r.employeeId === emp.id && 
+                        r.timestamp.startsWith(dateStr)
+                    );
+                    const recWithIn = dayRecords.find(r => {
+                        const t = String(r.type || '').toLowerCase();
+                        return (r.jamMasuk && String(r.jamMasuk).length > 0) || (r.typeMasuk && String(r.typeMasuk).length > 0) || t === 'check-in' || t === 'masuk';
+                    });
+                    const recWithOut = dayRecords.find(r => {
+                        const t = String(r.type || '').toLowerCase();
+                        return (r.jamKeluar && String(r.jamKeluar).length > 0) || (r.typeKeluar && String(r.typeKeluar).length > 0) || t === 'check-out' || t === 'pulang';
+                    });
+                    const leaveRec = dayRecords.find(r => {
+                        const t = String(r.type || '').toLowerCase();
+                        return (r.leaveType && String(r.leaveType).length > 0) || t === 'leave' || t === 'izin' || t === 'cuti' || t === 'sakit';
+                    });
+
+                    let inTime = '-';
+                    let outTime = '-';
+                    let inStatus = '-';
+                    let outStatus = '-';
+                    let denda = 0;
+                    
+                    if (leaveRec) {
+                        const type = (leaveRec.leaveType || leaveRec.status || '').toLowerCase();
+                        inStatus = leaveRec.leaveType || 'Izin';
+                        outStatus = '-';
+                        // denda stays 0 for valid leave
+                    } else if (recWithIn) {
+                            if (recWithIn.jamMasuk) inTime = formatTime(recWithIn.jamMasuk);
+                            else inTime = formatTime(recWithIn.timestamp);
+                            inStatus = recWithIn.statusMasuk || recWithIn.status || 'Hadir';
+                            if (inStatus.toLowerCase().includes('terlambat')) denda += (systemSettings.denda?.terlambat || 0);
+                    }
+                    
+                    if (!leaveRec) {
+                        if (recWithOut) {
+                                if (recWithOut.jamKeluar) outTime = recWithOut.jamKeluar;
+                                else outTime = formatTime(recWithOut.timestamp);
+                                outStatus = recWithOut.statusKeluar || recWithOut.status || 'Pulang';
+                                if (outStatus.toLowerCase().includes('cepat')) denda += (systemSettings.denda?.pulangCepat || 0);
+                        } else if (recWithIn) {
+                            outStatus = 'Belum Absen';
+                        } else {
+                            // Tidak ada record check-in
+                            if (dateStr < todayStr && !isWeekend) {
+                                inStatus = 'Alpa';
+                                outStatus = 'Alpa';
+                                denda += (systemSettings.denda?.alpa || 0);
+                            }
+                        }
+                    }
+
+                    return {
+                        emp,
+                        in: inTime,
+                        out: outTime,
+                        inStatus,
+                        outStatus,
+                        denda
+                    };
+                });
+                return { dateStr, rows };
+            }, [employees, attendance, reportDate, systemSettings]);
+
+            const periodRange = useMemo(() => {
+                if (activeTab === 'triwulan') {
+                    const q = Number(reportQuarter);
+                    const startMonth = (q - 1) * 3 + 1;
+                    const endMonth = startMonth + 2;
+                    const start = `${reportYear}-${pad2(startMonth)}-01`;
+                    const end = `${reportYear}-${pad2(endMonth)}-${pad2(lastDayOfMonth(reportYear, endMonth))}`;
+                    return { label: `Triwulan ${q} Tahun ${reportYear}`, start, end };
+                }
+                if (activeTab === 'semester') {
+                    const s = Number(reportSemester);
+                    const startMonth = s === 1 ? 1 : 7;
+                    const endMonth = s === 1 ? 6 : 12;
+                    const start = `${reportYear}-${pad2(startMonth)}-01`;
+                    const end = `${reportYear}-${pad2(endMonth)}-${pad2(lastDayOfMonth(reportYear, endMonth))}`;
+                    return { label: `Semester ${s} Tahun ${reportYear}`, start, end };
+                }
+                if (activeTab === 'tahunan') {
+                    const start = `${reportYear}-01-01`;
+                    const end = `${reportYear}-12-31`;
+                    return { label: `Tahun ${reportYear}`, start, end };
+                }
+                return null;
+            }, [activeTab, reportQuarter, reportSemester, reportYear]);
+
+            const summaryData = useMemo(() => {
+                if (!periodRange) return { rows: [] };
+                
+                // Helper to get all dates
+                const getDates = (start, end) => {
+                    const arr = [];
+                    let dt = new Date(start);
+                    const e = new Date(end);
+                    while (dt <= e) {
+                        arr.push(new Date(dt).toISOString().slice(0, 10));
+                        dt.setDate(dt.getDate() + 1);
+                    }
+                    return arr;
+                };
+
+                const allDates = getDates(periodRange.start, periodRange.end);
+                const todayStr = new Date().toISOString().slice(0, 10);
+
+                const rows = employees.map(emp => {
+                    let checkInCount = 0;
+                    let checkOutCount = 0;
+                    let countTerlambat = 0;
+                    let countPulangCepat = 0;
+                    let countAlpa = 0;
+                    let countSakit = 0;
+                    let countIzin = 0;
+                    let countCuti = 0;
+                    let totalDenda = 0;
+
+                    // Optimization: Filter attendance for this employee first
+                    const empRecords = filteredAttendance.filter(r => r.employeeId === emp.id);
+
+                    allDates.forEach(dateStr => {
+                        const dateObj = new Date(dateStr);
+                        const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+
+                        const dayRecs = empRecords.filter(r => r.timestamp.startsWith(dateStr));
+                        const checkIn = dayRecs.find(r => {
+                            const t = String(r.type || '').toLowerCase();
+                            return (r.jamMasuk && String(r.jamMasuk).length > 0) ||
+                                (r.typeMasuk && String(r.typeMasuk).length > 0) ||
+                                t === 'check-in' || t === 'masuk';
+                        });
+                        const checkOut = dayRecs.find(r => {
+                            const t = String(r.type || '').toLowerCase();
+                            return (r.jamKeluar && String(r.jamKeluar).length > 0) ||
+                                (r.typeKeluar && String(r.typeKeluar).length > 0) ||
+                                t === 'check-out' || t === 'pulang';
+                        });
+                        const leaveRec = dayRecs.find(r => {
+                            const t = String(r.type || '').toLowerCase();
+                            return (r.leaveType && String(r.leaveType).length > 0) ||
+                                t === 'leave' || t === 'izin' || t === 'cuti' || t === 'sakit';
+                        });
+
+                        if (leaveRec) {
+                            const type = (leaveRec.leaveType || leaveRec.status || '').toLowerCase();
+                            if (type.includes('sakit')) countSakit++;
+                            else if (type.includes('cuti')) countCuti++;
+                            else countIzin++;
+                        } else {
+                            if (checkIn) {
+                                const inStatus = (checkIn.statusMasuk || checkIn.status || '');
+                                checkInCount++;
+                                if (inStatus.toLowerCase().includes('terlambat')) {
+                                    countTerlambat++;
+                                    totalDenda += (systemSettings.denda?.terlambat || 0);
+                                }
+                            }
+
+                            if (checkOut) {
+                                const outStatus = (checkOut.statusKeluar || checkOut.status || '');
+                                checkOutCount++;
+                                if (outStatus.toLowerCase().includes('cepat')) {
+                                    countPulangCepat++;
+                                    totalDenda += (systemSettings.denda?.pulangCepat || 0);
+                                }
+                            } else if (checkIn) {
+                                // Masuk tapi tidak pulang
+                            } else {
+                                // Tidak ada record
+                                if (dateStr < todayStr && !isWeekend) {
+                                    countAlpa++;
+                                    totalDenda += (systemSettings.denda?.alpa || 0);
+                                }
+                            }
+                        }
+                    });
+
+                    return {
+                        emp,
+                        checkInCount,
+                        checkOutCount,
+                        countTerlambat,
+                        countPulangCepat,
+                        countAlpa,
+                        countSakit,
+                        countIzin,
+                        countCuti,
+                        totalDenda,
+                        hadirDays: checkInCount, // Total Hadir (Tepat + Terlambat)
+                        tepatWaktuDays: checkInCount - countTerlambat, // Hanya yang tepat waktu
+                        completeDays: Math.min(checkInCount, checkOutCount) // Legacy: Pairs
+                    };
+                });
+
+                return { rows };
+            }, [employees, attendance, periodRange, systemSettings]);
+
+            const isPrintable = (activeTab === 'rekap' || activeTab === 'karyawan' || activeTab === 'harian' || activeTab === 'triwulan' || activeTab === 'semester' || activeTab === 'tahunan');
+
+            const printTitle = useMemo(() => {
+                if (activeTab === 'rekap') return 'Laporan Rekapitulasi Absensi (Bulanan)';
+                if (activeTab === 'harian') return 'Laporan Absensi Harian';
+                if (activeTab === 'triwulan') return 'Laporan Absensi Triwulan';
+                if (activeTab === 'semester') return 'Laporan Absensi Semester';
+                if (activeTab === 'tahunan') return 'Laporan Absensi Tahunan';
+                if (activeTab === 'karyawan') return 'Data Karyawan Tetap';
+                return 'Laporan';
+            }, [activeTab]);
+
+            const printSubtitle = useMemo(() => {
+                if (activeTab === 'rekap') return `Periode Bulan: ${formatDate(`${month}-01`).split(' ').slice(1).join(' ')}`;
+                if (activeTab === 'harian') return `Tanggal: ${formatDate(reportDate)}`;
+                if (activeTab === 'karyawan') return `Per Tanggal: ${formatDate(null, true)}`;
+                if (periodRange) {
+                    const startLabel = formatDate(periodRange.start);
+                    const endLabel = formatDate(periodRange.end);
+                    return `${periodRange.label} (${startLabel} s/d ${endLabel})`;
+                }
+                return `Dicetak pada: ${formatDate(new Date(), true)} ${formatTime(new Date())}`;
+            }, [activeTab, month, periodRange, reportDate]);
+
+            const grandTotalDenda = useMemo(() => {
+                if (activeTab === 'rekap') return monthlyData.data.reduce((acc, r) => acc + r.stats.totalDenda, 0);
+                if (activeTab === 'harian') return dailyData.rows.reduce((acc, r) => acc + r.denda, 0);
+                if (activeTab === 'triwulan' || activeTab === 'semester' || activeTab === 'tahunan') return summaryData.rows.reduce((acc, r) => acc + (r.totalDenda || 0), 0);
+                return 0;
+            }, [activeTab, monthlyData, dailyData, summaryData]);
+
+            // --- Export Functions ---
+            const handlePrint = () => window.print();
+
+            const exportPDF = () => {
+                const element = document.getElementById('print-area');
+                const isLandscape = activeTab === 'rekap';
+                const periodKey = (
+                    activeTab === 'rekap' ? month :
+                    activeTab === 'harian' ? reportDate :
+                    activeTab === 'triwulan' ? `${reportYear}_Q${reportQuarter}` :
+                    activeTab === 'semester' ? `${reportYear}_S${reportSemester}` :
+                    activeTab === 'tahunan' ? reportYear :
+                    activeTab === 'karyawan' ? new Date().toISOString().slice(0, 10) :
+                    new Date().toISOString().slice(0, 10)
+                );
+                const opt = {
+                    margin: 0,
+                    filename: `Laporan_${activeTab}_${periodKey}_${paperSize}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { 
+                        unit: 'mm', 
+                        format: paperSize === 'A4' ? 'a4' : [215, 330],
+                        orientation: isLandscape ? 'landscape' : 'portrait'
+                    },
+                    pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' }
+                };
+                html2pdf().set(opt).from(element).save();
+            };
+
+            const exportExcelRecap = () => {
+                const wsData = [];
+                // Header
+                const daysHeader = monthlyData.days.map(String);
+                wsData.push(["Nama Karyawan", "Jabatan", ...daysHeader]);
+
+                // Data
+                monthlyData.data.forEach(row => {
+                    const rowData = [row.emp.name, row.emp.role];
+                    monthlyData.days.forEach(d => {
+                        const att = row.attendance[d];
+                        const cellVal = (att.in !== '-' ? `IN:${att.in}` : '') + (att.out !== '-' ? ` OUT:${att.out}` : '');
+                        rowData.push(cellVal.trim());
+                    });
+                    wsData.push(rowData);
+                });
+
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.aoa_to_sheet(wsData);
+                XLSX.utils.book_append_sheet(wb, ws, "Rekap Absensi");
+                XLSX.writeFile(wb, `Rekap_Absensi_${month}.xlsx`);
+            };
+
+            const downloadTemplate = () => {
+                const wb = XLSX.utils.book_new();
+                const headers = ["ID Karyawan", "Nama Karyawan", "NIK", "NPP", "Unit Kerja", "Jabatan", "Golongan", "Pangkat", "Masa Kerja", "Password (Default: 123)"];
+                const example = ["AM2-999", "Contoh Nama", "3201010101010001", "NPP-999", "Kantor Cabang", "Staf", "III/a", "Penata Muda", "5 Tahun", "123"];
+                const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+                XLSX.utils.book_append_sheet(wb, ws, "Template Karyawan");
+                XLSX.writeFile(wb, "Template_Import_Karyawan.xlsx");
+            };
+
+            const downloadAttendanceTemplate = () => {
+                const wb = XLSX.utils.book_new();
+                const headers = ["ID Karyawan", "Tanggal (YYYY-MM-DD)", "Jam (HH:MM)", "Tipe (check-in/check-out)", "Status", "Shift", "Lokasi", "Catatan"];
+                const example = ["AM2-001", "2024-01-01", "07:30", "check-in", "hadir", "Pagi", "Kantor", "Hadir Tepat Waktu"];
+                const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+                XLSX.utils.book_append_sheet(wb, ws, "Template Absensi");
+                XLSX.writeFile(wb, "Template_Import_Absensi.xlsx");
+            };
+
+            const downloadDataJSON = () => {
+                const data = {
+                    employees: employees,
+                    attendance: attendance,
+                    exportedAt: new Date().toISOString()
+                };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `backup_absensi_full_${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+            };
+
+            const exportEmployeesExcel = () => {
+                const wb = XLSX.utils.book_new();
+                // Map to match the Import Template structure for easy round-trip
+                const exportData = employees.map(e => ({
+                    "ID Karyawan": e.id,
+                    "Nama Karyawan": e.name,
+                    "Unit Kerja": e.workUnit,
+                    "Jabatan": e.role,
+                    "Password (Default: 123)": e.password,
+                    "Jenis Kelamin (L/P)": e.gender,
+                    "No. HP": e.phone,
+                    "Email": e.email,
+                    "Alamat": e.address,
+                    "Tanggal Bergabung (YYYY-MM-DD)": e.joinDate,
+                    "NIK": e.nik,
+                    "NPP": e.npp,
+                    "Golongan": e.golongan,
+                    "Pangkat": e.pangkat,
+                    "Masa Kerja": e.masaKerja,
+                    "Tempat Lahir": e.birthPlace,
+                    "Tanggal Lahir (YYYY-MM-DD)": e.birthDate,
+                    "Agama": e.religion,
+                    "Status Perkawinan": e.maritalStatus,
+                    "Status Karyawan": e.status
+                }));
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                XLSX.utils.book_append_sheet(wb, ws, "Data Karyawan");
+                XLSX.writeFile(wb, `Data_Karyawan_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            };
+
+            const exportAttendanceExcel = (mode) => {
+                const headers = [
+                    "recordId", "employeeId", "employeeName", "workUnit", "", "timestamp", 
+                    "jamMasuk", "typeMasuk", "statusMasuk", "shift", 
+                    "jamKeluar", "typeKeluar", "statusKeluar", "workLocation", 
+                    "notes", "method", "leaveType"
+                ];
+
+                const start = mode === "all" ? null : parseISODate(exportStartDate);
+                const end = mode === "all" ? null : parseISODate(exportEndDate);
+
+                const filtered = filteredAttendance
+                    .filter((r) => {
+                        if (!r || !r.timestamp) return false;
+                        if (!start || !end) return true;
+                        const d = new Date(r.timestamp);
+                        if (Number.isNaN(d.getTime())) return false;
+                        return d >= start && d <= new Date(end.getTime() + 24 * 60 * 60 * 1000 - 1);
+                    })
+                    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                const rows = filtered.map((r) => {
+                    const t = String(r.type || "").toLowerCase();
+                    const isCheckIn = t === "check-in" || !!r.jamMasuk || !!r.typeMasuk;
+                    const isCheckOut = t === "check-out" || !!r.jamKeluar || !!r.typeKeluar;
+
+                    const jamMasuk = r.jamMasuk
+                        ? String(r.jamMasuk)
+                        : (isCheckIn ? formatTime(r.timestamp) : "");
+                    const jamKeluar = r.jamKeluar
+                        ? String(r.jamKeluar)
+                        : (isCheckOut ? formatTime(r.timestamp) : "");
+
+                    const statusMasuk = r.statusMasuk || (isCheckIn ? String(r.status || "") : "");
+                    const statusKeluar = r.statusKeluar || (isCheckOut ? String(r.status || "") : "");
+
+                    const typeMasuk = r.typeMasuk || (jamMasuk ? "Masuk" : "");
+                    const typeKeluar = r.typeKeluar || (jamKeluar ? "Pulang" : "");
+
+                    return [
+                        r.recordId || "",
+                        r.employeeId || "",
+                        r.employeeName || "",
+                        r.workUnit || "",
+                        "",
+                        r.timestamp || "",
+                        jamMasuk,
+                        typeMasuk,
+                        statusMasuk,
+                        r.shift || "",
+                        jamKeluar,
+                        typeKeluar,
+                        statusKeluar,
+                        r.workLocation || "",
+                        r.notes || "",
+                        r.method || "Wajah",
+                        r.leaveType || ""
+                    ];
+                });
+
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+                XLSX.utils.book_append_sheet(wb, ws, "Data Absensi");
+                XLSX.writeFile(wb, `Data_Absensi_${mode}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            };
+
+            const handleImportEmployees = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: "binary" });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        const data = XLSX.utils.sheet_to_json(ws);
+
+                        const newEmployees = data.map(row => ({
+                            id: String(row["ID Karyawan"] || ""),
+                            name: String(row["Nama Karyawan"] || ""),
+                            workUnit: String(row["Unit Kerja"] || ""),
+                            role: String(row["Jabatan"] || ""),
+                            password: String(row["Password (Default: 123)"] || "123"),
+                            nik: String(row["NIK"] || ""),
+                            npp: String(row["NPP"] || ""),
+                            golongan: String(row["Golongan"] || ""),
+                            pangkat: String(row["Pangkat"] || ""),
+                            masaKerja: String(row["Masa Kerja"] || "")
+                        })).filter(e => e.id);
+
+                        const current = DB.getEmployees();
+                        const merged = [...current];
+                        const currentIds = new Set(current.map(e => e.id));
+
+                        let addedCount = 0;
+                        let updatedCount = 0;
+                        
+                        newEmployees.forEach(e => {
+                            if (currentIds.has(e.id)) {
+                                const idx = merged.findIndex(m => m.id === e.id);
+                                merged[idx] = { ...merged[idx], ...e };
+                                updatedCount++;
+                            } else {
+                                merged.push(e);
+                                addedCount++;
+                            }
+                        });
+
+                        localStorage.setItem('employees_data', JSON.stringify(merged));
+                        setEmployees(merged);
+                        alert(`Import Berhasil!\nDitambahkan: ${addedCount}\nDiperbarui: ${updatedCount}`);
+                    } catch (err) {
+                        console.error(err);
+                        alert("Gagal membaca file Excel. Pastikan format sesuai template.");
+                    }
+                };
+                reader.readAsBinaryString(file);
+            };
+
+            const handleImportAttendance = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: "binary" });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        const data = XLSX.utils.sheet_to_json(ws);
+
+                        const newRecords = data.map(row => {
+                            // Map columns based on template headers
+                            // Headers: ["ID Karyawan", "Tanggal (YYYY-MM-DD)", "Jam (HH:MM)", "Tipe (check-in/check-out)", "Status", "Shift", "Lokasi", "Catatan"]
+                            const dateStr = row["Tanggal (YYYY-MM-DD)"];
+                            const timeStr = row["Jam (HH:MM)"];
+                            const type = row["Tipe (check-in/check-out)"];
+                            const empId = row["ID Karyawan"];
+                            const jamMasuk = row["Jam Masuk"] || row["Jam Masuk (HH:MM)"] || "";
+                            const jamKeluar = row["Jam Keluar"] || row["Jam Keluar (HH:MM)"] || "";
+                            
+                            if (!dateStr || !timeStr || !type || !empId) return null;
+
+                            // Construct timestamp
+                            // Handle Excel date number if necessary, but assuming text YYYY-MM-DD for now as per template
+                            // If user types raw, SheetJS might parse as date.
+                            
+                            let timestamp = "";
+                            if (dateStr.toString().includes("-") && timeStr.toString().includes(":")) {
+                                timestamp = `${dateStr}T${timeStr}:00`;
+                            } else {
+                                // Fallback for simple concats or Excel serials if needed
+                                // For now strict to template format
+                                timestamp = `${dateStr}T${timeStr}`;
+                            }
+
+                            // Basic cleanup
+                            timestamp = timestamp.replace(" ", "T");
+                            
+                            return {
+                                recordId: `${empId}_${timestamp}_${type}`,
+                                employeeId: empId,
+                                employeeName: "",
+                                workUnit: "",
+                                type: type,
+                                status: row["Status"] || "hadir",
+                                shift: row["Shift"] || "",
+                                workLocation: row["Lokasi"] || "",
+                                notes: row["Catatan"] || "",
+                                jamMasuk: jamMasuk || (type === "check-in" ? String(timeStr || "") : ""),
+                                jamKeluar: jamKeluar || (type === "check-out" ? String(timeStr || "") : ""),
+                                timestamp: timestamp,
+                                method: 'Import Excel'
+                            };
+                        }).filter(r => r !== null);
+
+                        const current = DB.getAttendance();
+                        const merged = [...current];
+                        const currentIds = new Set(current.map(r => r.recordId));
+
+                        let addedCount = 0;
+                        
+                        newRecords.forEach(r => {
+                            // Avoid duplicates by recordId
+                            if (!currentIds.has(r.recordId)) {
+                                merged.push(r);
+                                addedCount++;
+                            }
+                        });
+
+                        localStorage.setItem('attendance_records', JSON.stringify(merged));
+                        setAttendance(merged);
+                        alert(`Import Berhasil!\nData Absensi Ditambahkan: ${addedCount}`);
+                    } catch (err) {
+                        console.error(err);
+                        alert("Gagal membaca file Excel. Pastikan format sesuai template.");
+                    }
+                };
+                reader.readAsBinaryString(file);
+            };
+
+            return React.createElement("div", { className: "flex min-h-screen" },
+                // Sidebar (No Print)
+                React.createElement("div", { className: "w-64 bg-slate-900 text-white p-6 flex flex-col fixed h-full no-print overflow-y-auto" },
+                    React.createElement("div", { className: "flex items-center gap-3 mb-8" },
+                        React.createElement("div", { className: "bg-blue-600 p-2 rounded-lg" }, "🖨️"),
+                        React.createElement("h1", { className: "text-xl font-bold" }, "Pusat Cetak")
+                    ),
+                    
+                    React.createElement("div", { className: "space-y-2" },
+                        React.createElement("div", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2" }, "Laporan"),
+                        React.createElement("button", { onClick: () => setActiveTab("harian"), className: `w-full text-left p-3 rounded-lg ${activeTab === "harian" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "🗓️ Laporan Harian"),
+                        React.createElement("button", { onClick: () => setActiveTab("rekap"), className: `w-full text-left p-3 rounded-lg ${activeTab === "rekap" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "📅 Rekap Bulanan"),
+                        React.createElement("button", { onClick: () => setActiveTab("triwulan"), className: `w-full text-left p-3 rounded-lg ${activeTab === "triwulan" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "📆 Laporan Triwulan"),
+                        React.createElement("button", { onClick: () => setActiveTab("semester"), className: `w-full text-left p-3 rounded-lg ${activeTab === "semester" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "🗓️ Laporan Semester"),
+                        React.createElement("button", { onClick: () => setActiveTab("tahunan"), className: `w-full text-left p-3 rounded-lg ${activeTab === "tahunan" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "📅 Laporan Tahunan"),
+                        React.createElement("button", { onClick: () => setActiveTab("karyawan"), className: `w-full text-left p-3 rounded-lg ${activeTab === "karyawan" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "👥 Data Karyawan"),
+                        React.createElement("button", { onClick: () => setActiveTab("export"), className: `w-full text-left p-3 rounded-lg ${activeTab === "export" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "📤 Export Excel"),
+                        React.createElement("button", { onClick: () => setActiveTab("template"), className: `w-full text-left p-3 rounded-lg ${activeTab === "template" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "📥 Download Template"),
+                        React.createElement("button", { onClick: () => setActiveTab("backup"), className: `w-full text-left p-3 rounded-lg ${activeTab === "backup" ? "bg-blue-600" : "hover:bg-slate-800"}` }, "💾 Backup Data")
+                    ),
+                    React.createElement("a", { href: "index.html", className: "mt-auto text-slate-400 hover:text-white flex items-center gap-2 pt-6 border-t border-slate-700" }, "← Kembali ke Menu")
+                ),
+
+                // Main Content
+                React.createElement("div", { className: "flex-1 ml-64 p-8" },
+                    // Toolbar (No Print)
+                    React.createElement("div", { className: "bg-white p-4 rounded-xl shadow-sm border mb-8 flex justify-between items-center no-print sticky top-0 z-10" },
+                        React.createElement("div", { className: "flex items-center gap-4" },
+                            activeTab === 'rekap' && React.createElement("input", { type: "month", value: month, onChange: e => setMonth(e.target.value), className: "border p-2 rounded-lg" }),
+                            activeTab === 'harian' && React.createElement("div", { className: "flex items-center gap-2" },
+                                React.createElement("input", { type: "date", value: reportDate, onChange: e => setReportDate(e.target.value), className: "border p-2 rounded-lg" }),
+                                React.createElement("div", { className: "flex border rounded-lg overflow-hidden" },
+                                    React.createElement("button", { 
+                                        onClick: () => setHarianViewMode('jam'), 
+                                        className: `px-3 py-2 text-xs ${harianViewMode === 'jam' ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}` 
+                                    }, "Jam"),
+                                    React.createElement("button", { 
+                                        onClick: () => setHarianViewMode('status'), 
+                                        className: `px-3 py-2 text-xs ${harianViewMode === 'status' ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}` 
+                                    }, "Status"),
+                                    React.createElement("button", { 
+                                        onClick: () => setHarianViewMode('split'), 
+                                        className: `px-3 py-2 text-xs ${harianViewMode === 'split' ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'}` 
+                                    }, "Gabungan")
+                                )
+                            ),
+                            (activeTab === 'triwulan' || activeTab === 'semester' || activeTab === 'tahunan') && React.createElement(React.Fragment, null,
+                                React.createElement("input", { type: "number", min: "2000", max: "2100", value: reportYear, onChange: e => setReportYear(e.target.value), className: "border p-2 rounded-lg w-28", placeholder: "Tahun" }),
+                                activeTab === 'triwulan' && React.createElement("select", { value: reportQuarter, onChange: e => setReportQuarter(e.target.value), className: "border p-2 rounded-lg" },
+                                    React.createElement("option", { value: "1" }, "Q1"),
+                                    React.createElement("option", { value: "2" }, "Q2"),
+                                    React.createElement("option", { value: "3" }, "Q3"),
+                                    React.createElement("option", { value: "4" }, "Q4")
+                                ),
+                                activeTab === 'semester' && React.createElement("select", { value: reportSemester, onChange: e => setReportSemester(e.target.value), className: "border p-2 rounded-lg" },
+                                    React.createElement("option", { value: "1" }, "Semester 1"),
+                                    React.createElement("option", { value: "2" }, "Semester 2")
+                                )
+                            ),
+                            React.createElement("div", { className: "flex items-center gap-2" },
+                                React.createElement("span", { className: "text-xs text-gray-500" }, "Shift:"),
+                                React.createElement("select", {
+                                    value: shiftFilter,
+                                    onChange: e => setShiftFilter(e.target.value),
+                                    className: "border p-2 rounded-lg text-xs bg-white"
+                                },
+                                    React.createElement("option", { value: "ALL" }, "Semua Shift"),
+                                    shiftNames.map(name => React.createElement("option", { key: name, value: name }, name))
+                                )
+                            ),
+                            React.createElement("h2", { className: "text-lg font-bold text-gray-800" }, 
+                                activeTab === 'rekap' ? "Rekapitulasi Absensi (Bulanan)" : 
+                                activeTab === 'harian' ? "Laporan Absensi Harian" :
+                                activeTab === 'triwulan' ? "Laporan Absensi Triwulan" :
+                                activeTab === 'semester' ? "Laporan Absensi Semester" :
+                                activeTab === 'tahunan' ? "Laporan Absensi Tahunan" :
+                                activeTab === 'karyawan' ? "Laporan Data Karyawan" : 
+                                activeTab === 'export' ? "Export Data (Excel)" :
+                                activeTab === 'template' ? "Pusat Template & Import" : "Backup & Restore"
+                            )
+                        ),
+                        React.createElement("div", { className: "flex gap-2 items-center" },
+                            // Signer Selection
+                            isPrintable && React.createElement("div", { className: "flex items-center gap-2 mr-4 bg-gray-50 p-1.5 rounded-lg border" },
+                                React.createElement("span", { className: "text-xs font-semibold text-gray-500 ml-1" }, "TTD:"),
+                                React.createElement("select", { 
+                                    value: signerCount, 
+                                    onChange: (e) => setSignerCount(Number(e.target.value)),
+                                    className: "text-sm border-none bg-transparent focus:ring-0 cursor-pointer"
+                                },
+                                    React.createElement("option", { value: 1 }, "1 Pejabat"),
+                                    React.createElement("option", { value: 2 }, "2 Pejabat"),
+                                    React.createElement("option", { value: 3 }, "3 Pejabat")
+                                )
+                            ),
+
+                            // Toggle Fines
+                            isPrintable && (activeTab !== 'karyawan') && React.createElement("div", { className: "flex items-center gap-2 mr-4 bg-gray-50 p-1.5 rounded-lg border" },
+                                React.createElement("input", { 
+                                    type: "checkbox", 
+                                    checked: showFines, 
+                                    onChange: (e) => setShowFines(e.target.checked),
+                                    className: "w-4 h-4 text-blue-600 rounded focus:ring-blue-500 border-gray-300"
+                                }),
+                                React.createElement("span", { className: "text-xs font-semibold text-gray-500 ml-1" }, "Tampilkan Denda")
+                            ),
+
+                            // Paper Size Selector
+                            isPrintable && React.createElement("div", { className: "flex items-center gap-2 mr-4 bg-gray-50 p-1.5 rounded-lg border" },
+                                React.createElement("span", { className: "text-xs font-semibold text-gray-500 ml-1" }, "Kertas:"),
+                                React.createElement("select", { 
+                                    value: paperSize, 
+                                    onChange: (e) => setPaperSize(e.target.value),
+                                    className: "text-sm border-none bg-transparent focus:ring-0 cursor-pointer"
+                                },
+                                    React.createElement("option", { value: "A4" }, "A4"),
+                                    React.createElement("option", { value: "F4" }, "F4 (Folio)")
+                                )
+                            ),
+
+                            // Action Buttons
+                            isPrintable && React.createElement(React.Fragment, null,
+                                React.createElement("button", { onClick: handlePrint, className: "bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-900 flex items-center gap-2" }, "🖨️ Print"),
+                                React.createElement("button", { onClick: exportPDF, className: "bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 flex items-center gap-2" }, "📄 PDF"),
+                                activeTab === 'rekap' && React.createElement("button", { onClick: exportExcelRecap, className: "bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2" }, "📊 Excel")
+                            )
+                        )
+                    ),
+
+                    // Print Area Wrapper
+                    React.createElement("div", { className: "flex justify-center" },
+                        isPrintable ? 
+                        // Paper Container
+                        React.createElement("div", { 
+                            id: "print-area", 
+                            className: `paper-preview ${paperSize === 'A4' ? 'preview-A4 paper-A4' : 'preview-F4 paper-F4'} ${activeTab === 'rekap' ? 'landscape' : ''} bg-white shadow-2xl relative`
+                        }, 
+                            // Formal Header
+                            React.createElement("div", { className: "break-inside-avoid" },
+                                React.createElement(PrintHeader, { settings: systemSettings })
+                            ),
+
+                            // Title
+                            React.createElement("div", { className: "text-center mb-2 pb-2 break-inside-avoid" },
+                                React.createElement("h3", { className: "text-xl font-bold uppercase underline" }, 
+                                    printTitle
+                                ),
+                                React.createElement("p", { className: "text-gray-500 mt-1" }, printSubtitle)
+                            ),
+
+                            // Content: Rekap Bulanan
+                            activeTab === 'rekap' && React.createElement("div", { className: "overflow-x-auto" },
+                                React.createElement("table", { className: "rekap-table w-full text-[9px] border-collapse border border-black" },
+                                    React.createElement("thead", { className: "bg-gray-100" },
+                                        React.createElement("tr", null,
+                                            React.createElement("th", { className: "border border-black text-left w-[120px]" }, "Nama Karyawan"),
+                                            monthlyData.days.map(d => React.createElement("th", { key: d, className: "border border-black text-center w-[12px]" }, d)),
+                                            React.createElement("th", { className: "border border-black text-center w-[16px] bg-green-50", title: "Hadir" }, "H"),
+                                            React.createElement("th", { className: "border border-black text-center w-[16px] bg-yellow-50", title: "Terlambat" }, "T"),
+                                            React.createElement("th", { className: "border border-black text-center w-[22px] bg-blue-50", title: "Pulang Cepat" }, "PC"),
+                                            React.createElement("th", { className: "border border-black text-center w-[16px] bg-purple-50", title: "Sakit" }, "S"),
+                                            React.createElement("th", { className: "border border-black text-center w-[16px] bg-orange-50", title: "Izin" }, "I"),
+                                            React.createElement("th", { className: "border border-black text-center w-[16px] bg-pink-50", title: "Cuti" }, "C"),
+                                            React.createElement("th", { className: "border border-black text-center w-[22px] bg-red-50", title: "Tanpa Keterangan" }, "TK"),
+                                            React.createElement("th", { className: "border border-black text-center w-[16px] bg-red-100", title: "Alpa" }, "A"),
+                                            showFines && React.createElement("th", { className: "border border-black p-1 text-center w-24 bg-gray-200", title: "Total Estimasi Denda" }, "Denda")
+                                        )
+                                    ),
+                                    React.createElement("tbody", null,
+                                        monthlyData.data.map((row, i) => 
+                                            React.createElement("tr", { key: i },
+                                                React.createElement("td", { className: "border border-black font-medium" }, 
+                                                    React.createElement("div", null, row.emp.name),
+                                                    React.createElement("div", { className: "text-[8px] text-gray-500" }, row.emp.role)
+                                                ),
+                                                monthlyData.days.map(d => {
+                                                    const att = row.attendance[d];
+                                                    const hasData = att.in !== '-' || att.out !== '-';
+                                                    let cellClass = "border border-black text-center ";
+                                                    if (att.inStatus.toLowerCase().includes('terlambat')) cellClass += "bg-yellow-100 ";
+                                                    else if (hasData) cellClass += "bg-gray-50 ";
+
+                                                    return React.createElement("td", { key: d, className: cellClass },
+                                                        React.createElement("div", { className: "text-[8px]" }, att.in !== '-' ? att.in : ''),
+                                                        React.createElement("div", { className: "text-[8px]" }, att.out !== '-' ? att.out : '')
+                                                    );
+                                                }),
+                                                React.createElement("td", { className: "border border-black text-center font-bold bg-green-50" }, row.stats.countHadir),
+                                                React.createElement("td", { className: "border border-black text-center font-bold bg-yellow-50" }, row.stats.countTerlambat),
+                                                React.createElement("td", { className: "border border-black text-center font-bold bg-blue-50" }, row.stats.countPulangCepat),
+                                                React.createElement("td", { className: "border border-black text-center font-bold bg-purple-50" }, row.stats.countSakit),
+                                                React.createElement("td", { className: "border border-black text-center font-bold bg-orange-50" }, row.stats.countIzin),
+                                                React.createElement("td", { className: "border border-black text-center font-bold bg-pink-50" }, row.stats.countCuti),
+                                                React.createElement("td", { className: "border border-black text-center font-bold bg-red-50" }, row.stats.countTanpaKet),
+                                                React.createElement("td", { className: "border border-black text-center font-bold bg-red-100" }, row.stats.countAlpa),
+                                                showFines && React.createElement("td", { className: "border border-black p-1 text-right font-bold bg-gray-200 text-xs" }, formatRupiah(row.stats.totalDenda))
+                                            )
+                                        )
+                                    ),
+                                    showFines && React.createElement("tfoot", { className: "bg-gray-100 font-bold border-t-2 border-black" },
+                                        React.createElement("tr", null,
+                                            React.createElement("td", { colSpan: monthlyData.days.length + 9, className: "border border-black p-1 text-right" }, "TOTAL:"),
+                                            React.createElement("td", { className: "border border-black p-1 text-right text-red-600" }, formatRupiah(grandTotalDenda))
+                                        ),
+                                        showFines && React.createElement("tfoot", { className: "bg-gray-100 font-bold border-t-2 border-black" },
+                                            React.createElement("tr", null,
+                                                React.createElement("td", { colSpan: 7, className: "border border-black p-1 text-right" }, "TOTAL:"),
+                                                React.createElement("td", { className: "border border-black p-1 text-right text-red-600" }, formatRupiah(grandTotalDenda))
+                                            )
+                                        )
+                                    )
+                                ),
+                                showFines && React.createElement("tfoot", { className: "bg-gray-100 font-bold border-t-2 border-black" },
+                                    React.createElement("tr", null,
+                                        React.createElement("td", { colSpan: 10, className: "border border-black p-1 text-right" }, "TOTAL:"),
+                                        React.createElement("td", { className: "border border-black p-1 text-right text-red-600" }, formatRupiah(grandTotalDenda))
+                                    )
+                                )
+                            ),
+
+                            // Content: Harian
+                            activeTab === 'harian' && React.createElement(React.Fragment, null,
+                                (harianViewMode === 'jam' || harianViewMode === 'split') && React.createElement("div", null,
+                                    harianViewMode === 'split' && React.createElement("h4", { className: "text-center font-bold mb-2 uppercase" }, "Laporan Waktu Absensi"),
+                                    React.createElement("table", { className: "w-full text-xs border-collapse border border-black mb-4" },
+                                        React.createElement("thead", { className: "bg-gray-100" },
+                                            React.createElement("tr", null,
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "No"),
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "NPP"),
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "Nama Lengkap"),
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "Unit Kerja"),
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "Jabatan"),
+                                                React.createElement("th", { className: "border border-black p-1 text-center" }, "Jam Masuk"),
+                                                React.createElement("th", { className: "border border-black p-1 text-center" }, "Jam Pulang"),
+                                                showFines && React.createElement("th", { className: "border border-black p-1 text-center" }, "Denda")
+                                            )
+                                        ),
+                                        React.createElement("tbody", null,
+                                            dailyData.rows.map((row, i) =>
+                                                React.createElement("tr", { key: row.emp.id },
+                                                    React.createElement("td", { className: "border border-black p-1 text-center" }, i + 1),
+                                                    React.createElement("td", { className: "border border-black p-1 font-mono" }, row.emp.npp || "-"),
+                                                    React.createElement("td", { className: "border border-black p-1 font-medium" }, row.emp.name),
+                                                    React.createElement("td", { className: "border border-black p-1" }, row.emp.workUnit),
+                                                    React.createElement("td", { className: "border border-black p-1" }, row.emp.role),
+                                                    React.createElement("td", { className: "border border-black p-1 text-center font-mono" }, formatTime(row.in)),
+                                                    React.createElement("td", { className: "border border-black p-1 text-center font-mono" }, formatTime(row.out)),
+                                                    showFines && React.createElement("td", { className: "border border-black p-1 text-right font-mono text-red-600" }, row.denda > 0 ? formatRupiah(row.denda) : "-")
+                                                )
+                                            )
+                                        ),
+                                        showFines && React.createElement("tfoot", { className: "bg-gray-100 font-bold border-t-2 border-black" },
+                                            React.createElement("tr", null,
+                                                React.createElement("td", { colSpan: 8, className: "border border-black p-1 text-right" }, "TOTAL:"),
+                                                React.createElement("td", { className: "border border-black p-1 text-right text-red-600" }, formatRupiah(grandTotalDenda))
+                                            )
+                                        )
+                                    )
+                                ),
+                                
+                                harianViewMode === 'split' && React.createElement("div", { className: "page-break my-8 block" }),
+
+                                (harianViewMode === 'status' || harianViewMode === 'split') && React.createElement("div", null,
+                                    harianViewMode === 'split' && React.createElement("h4", { className: "text-center font-bold mb-2 uppercase" }, "Laporan Status Kehadiran"),
+                                    React.createElement("table", { className: "w-full text-xs border-collapse border border-black" },
+                                        React.createElement("thead", { className: "bg-gray-100" },
+                                            React.createElement("tr", null,
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "No"),
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "NPP"),
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "Nama Lengkap"),
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "Unit Kerja"),
+                                                React.createElement("th", { className: "border border-black p-1 text-left" }, "Jabatan"),
+                                                React.createElement("th", { className: "border border-black p-1 text-center" }, "Status Masuk"),
+                                                React.createElement("th", { className: "border border-black p-1 text-center" }, "Status Pulang"),
+                                                showFines && React.createElement("th", { className: "border border-black p-1 text-center" }, "Est. Denda")
+                                            )
+                                        ),
+                                        React.createElement("tbody", null,
+                                            dailyData.rows.map((row, i) =>
+                                                React.createElement("tr", { key: row.emp.id },
+                                                    React.createElement("td", { className: "border border-black p-1 text-center" }, i + 1),
+                                                    React.createElement("td", { className: "border border-black p-1 font-mono" }, row.emp.npp || "-"),
+                                                    React.createElement("td", { className: "border border-black p-1 font-medium" }, row.emp.name),
+                                                    React.createElement("td", { className: "border border-black p-1" }, row.emp.workUnit),
+                                                    React.createElement("td", { className: "border border-black p-1" }, row.emp.role),
+                                                    React.createElement("td", { className: "border border-black p-1 text-center font-bold" }, row.inStatus),
+                                                    React.createElement("td", { className: "border border-black p-1 text-center font-bold" }, row.outStatus),
+                                                    showFines && React.createElement("td", { className: "border border-black p-1 text-right font-bold text-red-600" }, row.denda > 0 ? formatRupiah(row.denda) : "-")
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            ),
+
+                            // Content: Triwulan/Semester/Tahunan (Summary)
+                            (activeTab === 'triwulan' || activeTab === 'semester' || activeTab === 'tahunan') && React.createElement("table", { className: "w-full text-xs border-collapse border border-black" },
+                                React.createElement("thead", { className: "bg-gray-100" },
+                                    React.createElement("tr", null,
+                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "No"),
+                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "NPP"),
+                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Nama Lengkap"),
+                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Unit Kerja"),
+                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Jabatan"),
+                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Hadir (Hari)"),
+                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Tepat Waktu"),
+                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Terlambat"),
+                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Pulang Cepat"),
+                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Sakit"),
+                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Izin"),
+                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Cuti"),
+                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Alpa"),
+                                        showFines && React.createElement("th", { className: "border border-black p-1 text-center" }, "Est. Denda")
+                                    )
+                                ),
+                                React.createElement("tbody", null,
+                                    summaryData.rows.map((row, i) =>
+                                        React.createElement("tr", { key: row.emp.id },
+                                            React.createElement("td", { className: "border border-black p-1 text-center" }, i + 1),
+                                            React.createElement("td", { className: "border border-black p-1 font-mono" }, row.emp.npp || "-"),
+                                            React.createElement("td", { className: "border border-black p-1 font-medium" }, row.emp.name),
+                                            React.createElement("td", { className: "border border-black p-1" }, row.emp.workUnit),
+                                            React.createElement("td", { className: "border border-black p-1" }, row.emp.role),
+                                            React.createElement("td", { className: "border border-black p-1 text-center font-bold" }, row.hadirDays),
+                                            React.createElement("td", { className: "border border-black p-1 text-center" }, row.tepatWaktuDays),
+                                            React.createElement("td", { className: "border border-black p-1 text-center" }, row.countTerlambat || 0),
+                                            React.createElement("td", { className: "border border-black p-1 text-center" }, row.countPulangCepat || 0),
+                                            React.createElement("td", { className: "border border-black p-1 text-center" }, row.countSakit || 0),
+                                            React.createElement("td", { className: "border border-black p-1 text-center" }, row.countIzin || 0),
+                                            React.createElement("td", { className: "border border-black p-1 text-center" }, row.countCuti || 0),
+                                            React.createElement("td", { className: "border border-black p-1 text-center font-bold text-red-600" }, row.countAlpa || 0),
+                                            showFines && React.createElement("td", { className: "border border-black p-1 text-right font-bold text-red-600" }, formatRupiah(row.totalDenda || 0))
+                                        )
+                                    )
+                                )
+                            ),
+
+                            // Content: Data Karyawan
+                            activeTab === 'karyawan' && (() => {
+                                const perPage = 10;
+                                if (!employees || employees.length === 0) {
+                                    return React.createElement("p", { className: "text-center text-sm text-gray-500" }, "Tidak ada data karyawan.");
+                                }
+                                const pages = [];
+                                for (let i = 0; i < employees.length; i += perPage) {
+                                    const pageEmployees = employees.slice(i, i + perPage);
+                                    const pageIndex = Math.floor(i / perPage);
+                                    pages.push(
+                                        React.createElement("div", {
+                                            key: "karyawan-page-" + pageIndex,
+                                            className: pageIndex === 0 ? "break-inside-avoid" : "page-break break-inside-avoid"
+                                        },
+                                            React.createElement("table", { className: "w-full text-xs border-collapse border border-black" },
+                                                React.createElement("thead", { className: "bg-gray-100" },
+                                                    React.createElement("tr", null,
+                                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "No"),
+                                                        React.createElement("th", { className: "border border-black p-1 text-center" }, "Foto"),
+                                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Nama Lengkap"),
+                                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "NPP"),
+                                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Unit Kerja"),
+                                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Jabatan"),
+                                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Golongan"),
+                                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Pangkat"),
+                                                        React.createElement("th", { className: "border border-black p-1 text-left" }, "Masa Kerja")
+                                                    )
+                                                ),
+                                                React.createElement("tbody", null,
+                                                    pageEmployees.map((emp, idx) =>
+                                                        React.createElement("tr", { key: emp.id },
+                                                            React.createElement("td", { className: "border border-black p-1 text-center" }, i + idx + 1),
+                                                            React.createElement("td", { className: "border border-black p-1 text-center" },
+                                                                emp.photoUrl 
+                                                                    ? React.createElement("img", { src: emp.photoUrl, className: "w-10 h-10 object-cover mx-auto rounded" })
+                                                                    : React.createElement("span", { className: "text-xs text-gray-400" }, "-")
+                                                            ),
+                                                            React.createElement("td", { className: "border border-black p-1 font-medium" }, emp.name),
+                                                            React.createElement("td", { className: "border border-black p-1" }, emp.npp || "-"),
+                                                            React.createElement("td", { className: "border border-black p-1" }, emp.workUnit),
+                                                            React.createElement("td", { className: "border border-black p-1" }, emp.role),
+                                                            React.createElement("td", { className: "border border-black p-1" }, emp.golongan || "-"),
+                                                            React.createElement("td", { className: "border border-black p-1" }, emp.pangkat || "-"),
+                                                            React.createElement("td", { className: "border border-black p-1" }, emp.masaKerja || "-")
+                                                        )
+                                                    )
+                                                )
+                                            ),
+                                            React.createElement(PrintFooter, { settings: systemSettings, signerCount: signerCount, compact: true })
+                                        )
+                                    );
+                                }
+                                return React.createElement(React.Fragment, null, pages);
+                            })(),
+
+                            activeTab !== 'karyawan' && React.createElement(PrintFooter, { settings: systemSettings, signerCount: signerCount, compact: true })
+                        ) : 
+                        // Non-print content (Export, Template & Backup)
+                        React.createElement("div", { className: "w-full max-w-4xl" },
+                            // Content: Export Excel
+                            activeTab === 'export' && React.createElement("div", { className: "space-y-6" },
+                                React.createElement("div", { className: "bg-white p-8 rounded-xl shadow-lg" },
+                                    React.createElement("h3", { className: "text-xl font-bold text-gray-800 mb-2" }, "Export Data Karyawan"),
+                                    React.createElement("p", { className: "text-gray-500 mb-6" }, "Unduh data karyawan dalam format Excel (.xlsx)."),
+                                    React.createElement("button", { onClick: exportEmployeesExcel, className: "bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-600/20 transition-transform active:scale-95" }, "📥 Export Karyawan (Excel)")
+                                ),
+                                React.createElement("div", { className: "bg-white p-8 rounded-xl shadow-lg" },
+                                    React.createElement("h3", { className: "text-xl font-bold text-gray-800 mb-2" }, "Export Data Absensi"),
+                                    React.createElement("p", { className: "text-gray-500 mb-6" }, "Unduh data absensi dalam format Excel (.xlsx). Anda bisa pilih rentang tanggal."),
+                                    React.createElement("div", { className: "flex flex-wrap gap-3 items-end mb-6" },
+                                        React.createElement("div", null,
+                                            React.createElement("div", { className: "text-sm font-semibold text-slate-700 mb-1" }, "Mulai"),
+                                            React.createElement("input", { type: "date", value: exportStartDate, onChange: e => setExportStartDate(e.target.value), className: "border p-2 rounded-lg" })
+                                        ),
+                                        React.createElement("div", null,
+                                            React.createElement("div", { className: "text-sm font-semibold text-slate-700 mb-1" }, "Sampai"),
+                                            React.createElement("input", { type: "date", value: exportEndDate, onChange: e => setExportEndDate(e.target.value), className: "border p-2 rounded-lg" })
+                                        )
+                                    ),
+                                    React.createElement("div", { className: "flex flex-wrap gap-3" },
+                                        React.createElement("button", { onClick: () => exportAttendanceExcel("range"), className: "bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-transform active:scale-95" }, "📥 Export Absensi (Rentang)"),
+                                        React.createElement("button", { onClick: () => exportAttendanceExcel("all"), className: "bg-slate-800 text-white px-6 py-3 rounded-xl font-bold hover:bg-slate-900 shadow-lg shadow-slate-800/20 transition-transform active:scale-95" }, "📦 Export Absensi (Semua)")
+                                    )
+                                )
+                            ),
+
+                            // Content: Template Download & Import
+                            activeTab === 'template' && React.createElement("div", { className: "space-y-8" },
+                                // Template Section
+                                React.createElement("div", { className: "bg-white p-8 rounded-xl shadow-lg text-center" },
+                                    React.createElement("div", { className: "text-6xl mb-4" }, "📥"),
+                                    React.createElement("h3", { className: "text-2xl font-bold text-gray-800 mb-2" }, "Download Template"),
+                                    React.createElement("p", { className: "text-gray-500 mb-8 max-w-lg mx-auto" }, "Unduh template Excel untuk mengisi data secara manual sebelum di-import ke dalam sistem."),
+                                    React.createElement("div", { className: "flex flex-wrap justify-center gap-4" },
+                                        React.createElement("button", { onClick: downloadTemplate, className: "bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition-transform active:scale-95" }, "Download Template Karyawan"),
+                                        React.createElement("button", { onClick: downloadAttendanceTemplate, className: "bg-violet-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-violet-700 shadow-lg shadow-violet-600/20 transition-transform active:scale-95" }, "Download Template Absensi")
+                                    )
+                                ),
+
+                                // Import Section
+                                React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-8" },
+                                    // Import Karyawan
+                                    React.createElement("div", { className: "bg-white p-8 rounded-xl shadow-lg" },
+                                        React.createElement("h3", { className: "text-xl font-bold text-gray-800 mb-4 flex items-center gap-2" }, 
+                                            React.createElement("span", null, "👥"), "Import Data Karyawan"
+                                        ),
+                                        React.createElement("p", { className: "text-sm text-gray-500 mb-4" }, "Upload file Excel (xlsx) sesuai template karyawan."),
+                                        React.createElement("input", { 
+                                            type: "file", 
+                                            accept: ".xlsx, .xls",
+                                            onChange: handleImportEmployees,
+                                            className: "block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                                        })
+                                    ),
+                                    // Import Absensi
+                                    React.createElement("div", { className: "bg-white p-8 rounded-xl shadow-lg" },
+                                        React.createElement("h3", { className: "text-xl font-bold text-gray-800 mb-4 flex items-center gap-2" }, 
+                                            React.createElement("span", null, "📅"), "Import Data Absensi"
+                                        ),
+                                        React.createElement("p", { className: "text-sm text-gray-500 mb-4" }, "Upload file Excel (xlsx) sesuai template absensi."),
+                                        React.createElement("input", { 
+                                            type: "file", 
+                                            accept: ".xlsx, .xls",
+                                            onChange: handleImportAttendance,
+                                            className: "block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"
+                                        })
+                                    )
+                                )
+                            ),
+
+                            // Content: Backup
+                            activeTab === 'backup' && React.createElement("div", { className: "bg-white p-8 rounded-xl shadow-lg text-center py-12" },
+                                React.createElement("div", { className: "mb-6" },
+                                    React.createElement("div", { className: "w-24 h-24 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4" },
+                                        React.createElement("svg", { xmlns:"http://www.w3.org/2000/svg", className:"w-12 h-12", fill:"none", viewBox:"0 0 24 24", stroke:"currentColor" },
+                                            React.createElement("path", { strokeLinecap:"round", strokeLinejoin:"round", strokeWidth:2, d:"M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" })
+                                        )
+                                    ),
+                                    React.createElement("h3", { className: "text-xl font-bold text-gray-800" }, "Backup Data Lengkap"),
+                                    React.createElement("p", { className: "text-gray-500 mt-2 max-w-md mx-auto" }, "Download seluruh data absensi dan data karyawan dalam format JSON untuk cadangan keamanan.")
+                                ),
+                                React.createElement("button", { onClick: downloadDataJSON, className: "bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-transform active:scale-95" }, "Download Backup JSON")
+                            )
+                        )
+                    )
+                )
+            );
+        };
+
+        const rootElement = document.getElementById("root");
+        if (rootElement) {
+            ReactDOM.render(
+                React.createElement(React.Fragment, null, 
+                    React.createElement(App),
+                    React.createElement("div", {
+                        className: "no-print fixed bottom-2 right-3 text-[11px] text-gray-400 pointer-events-none select-none"
+                    }, "created by s4h33r_78")
+                ), 
+                rootElement
+            );
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,2438 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Sistem Absensi Karyawan</title>
+    <script src="vendor/tailwindcss.js" onerror="this.onerror=null;this.src='https://cdn.tailwindcss.com'"></script>
+    <script crossorigin src="vendor/react.production.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/react@18/umd/react.production.min.js'"></script>
+    <script crossorigin src="vendor/react-dom.production.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/react-dom@18/umd/react-dom.production.min.js'"></script>
+    <script src="vendor/lucide.js" onerror="this.onerror=null;this.src='https://unpkg.com/lucide@latest'"></script>
+    <script src="vendor/xlsx.full.min.js" onerror="this.onerror=null;this.src='https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js'"></script>
+    <script src="vendor/html2pdf.bundle.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'"></script>
+    <script src="vendor/lz-string.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js'"></script>
+    <style>
+        body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif; background-color: #f3f4f6; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script>
+        window.onerror = function(msg, url, line, col, error) {
+            if (window.hasAlertedError) return;
+            
+            // Ignore benign script errors often caused by CDN/network glitches or extensions
+            if (String(msg).toLowerCase().includes("script error") && line === 0) {
+                console.warn("Ignored cross-origin script error:", msg);
+                return;
+            }
+
+            window.hasAlertedError = true;
+            const errorMsg = "System Error: " + msg + "\nLine: " + line;
+            const div = document.createElement("div");
+            div.style.cssText = "position:fixed; top:0; left:0; width:100%; background:red; color:white; padding:10px; z-index:9999;";
+            div.textContent = errorMsg;
+            document.body.appendChild(div);
+        };
+
+        if (typeof React === 'undefined') {
+            document.body.innerHTML = '<div style="padding:20px; text-align:center; color:red; font-family:sans-serif;">' +
+                '<h1>⚠️ System Error: React Tidak Termuat</h1>' +
+                '<p>Aplikasi gagal memuat library inti.</p>' +
+                '<div style="background:#fff; border:2px solid red; padding:15px; display:inline-block; text-align:left;">' +
+                '<strong>Solusi:</strong>' +
+                '<ol>' +
+                '<li>Jika Anda membuka file ini dari dalam <strong>ZIP</strong>, mohon <strong>EKSTRAK</strong> (Extract All) seluruh folder terlebih dahulu.</li>' +
+                '<li>Pastikan folder <code>vendor</code> berada di lokasi yang sama dengan file ini.</li>' +
+                '<li>Jika Anda online, aplikasi akan mencoba mengunduh library secara otomatis (refresh halaman).</li>' +
+                '</ol>' +
+                '</div>' +
+                '</div>';
+            throw new Error("React not loaded - Check vendor folder or extract ZIP");
+        }
+
+        // --- LUCIDE ICON POLYFILL FOR REACT ---
+        // Mengubah definisi ikon vanilla Lucide (array) menjadi komponen React
+        // Ini diperlukan karena script lucide.js adalah versi vanilla, bukan versi React
+        if (typeof lucide !== 'undefined' && typeof React !== 'undefined') {
+            Object.keys(lucide).forEach(key => {
+                const iconDef = lucide[key];
+                if (Array.isArray(iconDef)) {
+                    lucide[key] = ({ color = "currentColor", size = 24, strokeWidth = 2, className = "", ...props }) => 
+                        React.createElement("svg", {
+                            xmlns: "http://www.w3.org/2000/svg",
+                            width: size,
+                            height: size,
+                            viewBox: "0 0 24 24",
+                            fill: "none",
+                            stroke: color,
+                            strokeWidth: strokeWidth,
+                            strokeLinecap: "round",
+                            strokeLinejoin: "round",
+                            className: className,
+                            ...props
+                        }, ...iconDef.map(([tag, attrs], i) => 
+                            React.createElement(tag, { ...attrs, key: i })
+                        ));
+                }
+            });
+        }
+
+        const { useState, useEffect, useMemo } = React;
+
+        const formatTime = (isoString) => {
+            if (!isoString || isoString === '-') return '-';
+            try {
+                const d = new Date(isoString);
+                if (isNaN(d.getTime())) return isoString;
+                const hours = String(d.getHours()).padStart(2, '0');
+                const minutes = String(d.getMinutes()).padStart(2, '0');
+                return `${hours}:${minutes}`;
+            } catch (e) {
+                return isoString;
+            }
+        };
+
+        const formatDate = (dateString, defaultToNow = false) => {
+            let date;
+            if (!dateString || dateString === '-' || dateString === 'null') {
+                if (!defaultToNow) return '-';
+                date = new Date();
+            } else {
+                date = new Date(dateString);
+                if (isNaN(date.getTime())) {
+                    if (defaultToNow) date = new Date();
+                    else return dateString;
+                }
+            }
+            return date.toLocaleDateString('id-ID', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+            });
+        };
+
+        const fixSheetDate = (isoStr) => {
+            if (!isoStr || isoStr === "-" || isoStr === "null") return "";
+            try {
+                const d = new Date(isoStr);
+                if (isNaN(d.getTime())) return isoStr;
+                // Add 12 hours to compensate for timezone shifts
+                d.setHours(d.getHours() + 12);
+                return d.toISOString().slice(0, 10);
+            } catch (e) {
+                return isoStr;
+            }
+        };
+
+        const DEFAULT_EMPLOYEES = [
+            { "id": "AM2-001", "name": "Sahirudin, S.Kel", "workUnit": "Kantor Cabang", "role": "Kepala Unit", "password": "123", "gender": "L", "phone": "081234567890", "email": "sahirudin@example.com", "address": "Jl. Contoh No. 1", "joinDate": "2020-01-01", "nik": "3201010101010001", "npp": "NPP-001", "golongan": "III/c", "pangkat": "Penata", "masaKerja": "10 Tahun", "birthPlace": "Jakarta", "birthDate": "1980-01-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-002", "name": "Bustaman Hayatuddin", "workUnit": "Kantor Cabang", "role": "Kepala Operator Teknik", "password": "123", "gender": "L", "phone": "081234567891", "email": "bustaman@example.com", "address": "Jl. Contoh No. 2", "joinDate": "2020-02-01", "nik": "3201010101010002", "npp": "NPP-002", "golongan": "III/b", "pangkat": "Penata Muda Tk. I", "masaKerja": "8 Tahun", "birthPlace": "Bandung", "birthDate": "1981-02-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-003", "name": "Aji Bayu Leksono", "workUnit": "Kantor Cabang", "role": "Kepala Operator Adm. & Keuangan", "password": "123", "gender": "L", "phone": "081234567892", "email": "aji@example.com", "address": "Jl. Contoh No. 3", "joinDate": "2020-03-01", "nik": "3201010101010003", "npp": "NPP-003", "golongan": "III/a", "pangkat": "Penata Muda", "masaKerja": "5 Tahun", "birthPlace": "Surabaya", "birthDate": "1982-03-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-004", "name": "Abdul Latif Karim", "workUnit": "Kantor Cabang", "role": "Pelaksana Intek & IPA", "password": "123", "gender": "L", "phone": "081234567893", "email": "latif@example.com", "address": "Jl. Contoh No. 4", "joinDate": "2020-04-01", "nik": "3201010101010004", "npp": "NPP-004", "golongan": "II/d", "pangkat": "Pengatur Tk. I", "masaKerja": "4 Tahun", "birthPlace": "Medan", "birthDate": "1983-04-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-005", "name": "Abdul Salam Rasai", "workUnit": "Kantor Cabang", "role": "Pelaksana Distribusi & Penyambungan", "password": "123", "gender": "L", "phone": "081234567894", "email": "salam@example.com", "address": "Jl. Contoh No. 5", "joinDate": "2020-05-01", "nik": "3201010101010005", "npp": "NPP-005", "golongan": "II/c", "pangkat": "Pengatur", "masaKerja": "3 Tahun", "birthPlace": "Makassar", "birthDate": "1984-05-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-006", "name": "Muhammad Afandi Ahmad", "workUnit": "Kantor Cabang", "role": "Pelaksana Rekening & Penagihan", "password": "123", "gender": "L", "phone": "081234567895", "email": "afandi@example.com", "address": "Jl. Contoh No. 6", "joinDate": "2020-06-01", "nik": "3201010101010006", "npp": "NPP-006", "golongan": "II/b", "pangkat": "Pengatur Muda Tk. I", "masaKerja": "2 Tahun", "birthPlace": "Semarang", "birthDate": "1985-06-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-007", "name": "Zulkifli Dukomalamo", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "L", "phone": "081234567896", "email": "zulkifli@example.com", "address": "Jl. Contoh No. 7", "joinDate": "2020-07-01", "nik": "3201010101010007", "npp": "NPP-007", "golongan": "II/a", "pangkat": "Pengatur Muda", "masaKerja": "1 Tahun", "birthPlace": "Palembang", "birthDate": "1986-07-01", "religion": "Islam", "maritalStatus": "Belum Menikah", "status": "Kontrak" },
+            { "id": "AM2-008", "name": "Faisal Malik", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "L", "phone": "081234567897", "email": "faisal@example.com", "address": "Jl. Contoh No. 8", "joinDate": "2020-08-01", "nik": "3201010101010008", "npp": "NPP-008", "golongan": "I/d", "pangkat": "Juru Tk. I", "masaKerja": "1 Tahun", "birthPlace": "Denpasar", "birthDate": "1987-08-01", "religion": "Islam", "maritalStatus": "Belum Menikah", "status": "Kontrak" },
+            { "id": "AM2-009", "name": "Fitriyani S. Rajabessy", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "P", "phone": "081234567898", "email": "fitriyani@example.com", "address": "Jl. Contoh No. 9", "joinDate": "2020-09-01", "nik": "3201010101010009", "npp": "NPP-009", "golongan": "I/c", "pangkat": "Juru", "masaKerja": "1 Tahun", "birthPlace": "Yogyakarta", "birthDate": "1988-09-01", "religion": "Islam", "maritalStatus": "Belum Menikah", "status": "Kontrak" }
+        ];
+
+        // --- Data Access Layer (Mirrors Vr.js) ---
+        const DB = {
+            getEmployees: () => {
+                const data = JSON.parse(localStorage.getItem('employees_data') || "[]");
+                if (data.length === 0) return DEFAULT_EMPLOYEES; // Return defaults if empty, let save happen on edit/init
+                return data;
+            },
+            saveEmployees: (data) => localStorage.setItem('employees_data', JSON.stringify(data)),
+            getAttendance: () => JSON.parse(localStorage.getItem('attendance_records') || "[]"),
+            saveAttendance: (data) => localStorage.setItem('attendance_records', JSON.stringify(data)),
+            resetEmployees: () => {
+                localStorage.setItem('employees_data', JSON.stringify(DEFAULT_EMPLOYEES));
+                return DEFAULT_EMPLOYEES;
+            }
+        };
+
+        const ENDPOINT_KEY = "absensi_endpoint_v1";
+        const SETTINGS_KEY = "absensi_system_settings_v1";
+
+        const DEFAULT_SETTINGS = {
+            kopSurat: {
+                line1: "TIPE PERUSAHAAN",
+                line2: "NAMA PERUSAHAAN",
+                line3: "NAMA KOTA/KABUPATEN",
+                line4: "NAMA KANTOR UNIT/CABANG",
+                line5: "ALAMAT PERUSAHAAN",
+                line6: "NO. TELP/HP DAN EMAIL"
+            },
+            kantor: {
+                tipe: "Cabang",
+                nama: "Kantor Cabang",
+                address: "",
+                lat: "",
+                lng: "",
+                radiusM: "200"
+            },
+            shifts: [
+                { name: "Pagi", jamMasuk: "08:00", jamPulang: "17:00", toleransiTerlambatMenit: 15 }
+            ],
+            kehadiran: {
+                jamMasuk: "08:00",
+                toleransiTerlambatMenit: 15,
+                jamPulang: "17:00",
+                statusTersedia: ["Hadir", "Tepat Waktu", "Terlambat", "Pulang Cepat", "Lembur", "Sakit", "Izin", "Cuti"]
+            },
+            organisasi: {
+                unitKerjaTersedia: ["Kantor Pusat", "Kantor Cabang"],
+                jabatanTersedia: ["Kepala Unit", "Staf"],
+                hirarkiTersedia: ["Pimpinan", "Kepala Unit", "Staf"]
+            },
+            denda: {
+                terlambat: 20000,
+                pulangCepat: 10000,
+                alpa: 100000
+            },
+            penandatangan: {
+                kota: "Ternate",
+                jabatan1: "Kepala Cabang",
+                nama1: "SAHIRUDIN, S.Kel",
+                nip1: "NPP. 19800101 200001 1 001",
+                jabatan2: "Pejabat Lain",
+                nama2: "Nama Pejabat",
+                nip2: "NPP. -",
+                jabatan3: "Pejabat Lainnya",
+                nama3: "Nama Pejabat",
+                nip3: "NPP. -"
+            }
+        };
+
+        function normalizeLines(value) {
+            return String(value || "")
+                .split(/\r?\n/g)
+                .map(s => s.trim())
+                .filter(Boolean);
+        }
+
+        function getSystemSettings() {
+            try {
+                const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null");
+                if (!raw || typeof raw !== "object") return DEFAULT_SETTINGS;
+                const rawKop = (raw && raw.kopSurat && typeof raw.kopSurat === "object") ? raw.kopSurat : {};
+                const hasNewLines = ["line3", "line4", "line5", "line6"].some((k) => rawKop[k] !== undefined && rawKop[k] !== null && String(rawKop[k]).trim().length > 0);
+                const migratedKop = hasNewLines ? {
+                    line1: String(rawKop.line1 || DEFAULT_SETTINGS.kopSurat.line1),
+                    line2: String(rawKop.line2 || DEFAULT_SETTINGS.kopSurat.line2),
+                    line3: String(rawKop.line3 || rawKop.city || DEFAULT_SETTINGS.kopSurat.line3),
+                    line4: String(rawKop.line4 || rawKop.unit || DEFAULT_SETTINGS.kopSurat.line4),
+                    line5: String(rawKop.line5 || rawKop.address || DEFAULT_SETTINGS.kopSurat.line5),
+                    line6: String(rawKop.line6 || [rawKop.phone, rawKop.email].filter(Boolean).join(" | ") || DEFAULT_SETTINGS.kopSurat.line6)
+                } : {
+                    line1: String(DEFAULT_SETTINGS.kopSurat.line1),
+                    line2: String(rawKop.line1 || DEFAULT_SETTINGS.kopSurat.line2),
+                    line3: String(rawKop.city || DEFAULT_SETTINGS.kopSurat.line3),
+                    line4: String(rawKop.line2 || rawKop.unit || DEFAULT_SETTINGS.kopSurat.line4),
+                    line5: String(rawKop.address || DEFAULT_SETTINGS.kopSurat.line5),
+                    line6: String([rawKop.phone, rawKop.email].filter(Boolean).join(" | ") || DEFAULT_SETTINGS.kopSurat.line6)
+                };
+                const merged = {
+                    ...DEFAULT_SETTINGS,
+                    ...raw,
+                    kopSurat: migratedKop,
+                    kantor: { ...DEFAULT_SETTINGS.kantor, ...(raw.kantor || {}) },
+                    kehadiran: { ...DEFAULT_SETTINGS.kehadiran, ...(raw.kehadiran || {}) },
+                    organisasi: { ...DEFAULT_SETTINGS.organisasi, ...(raw.organisasi || {}) },
+                    denda: { ...DEFAULT_SETTINGS.denda, ...(raw.denda || {}) },
+                    penandatangan: { ...DEFAULT_SETTINGS.penandatangan, ...(raw.penandatangan || {}) },
+                    shifts: Array.isArray(raw.shifts) ? raw.shifts : (Array.isArray(DEFAULT_SETTINGS.shifts) ? DEFAULT_SETTINGS.shifts : [])
+                };
+                merged.kehadiran.statusTersedia = Array.isArray(merged.kehadiran.statusTersedia) ? merged.kehadiran.statusTersedia : DEFAULT_SETTINGS.kehadiran.statusTersedia;
+                merged.organisasi.unitKerjaTersedia = Array.isArray(merged.organisasi.unitKerjaTersedia) ? merged.organisasi.unitKerjaTersedia : DEFAULT_SETTINGS.organisasi.unitKerjaTersedia;
+                merged.organisasi.jabatanTersedia = Array.isArray(merged.organisasi.jabatanTersedia) ? merged.organisasi.jabatanTersedia : DEFAULT_SETTINGS.organisasi.jabatanTersedia;
+                merged.organisasi.hirarkiTersedia = Array.isArray(merged.organisasi.hirarkiTersedia) ? merged.organisasi.hirarkiTersedia : DEFAULT_SETTINGS.organisasi.hirarkiTersedia;
+                return merged;
+            } catch (_) {
+                return DEFAULT_SETTINGS;
+            }
+        }
+
+        function saveSystemSettings(settings) {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        }
+
+        function buildEndpointUrl(baseUrl, params) {
+            const base = (baseUrl || "").trim();
+            if (!base) return "";
+            const query = Object.entries(params || {})
+                .filter(([_, v]) => v !== undefined && v !== null && String(v).length > 0)
+                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+                .join("&");
+            if (!query) return base;
+            return base + (base.includes("?") ? "&" : "?") + query;
+        }
+
+        async function jsonpRequest(url, params, { timeoutMs = 12000, retries = 2 } = {}) {
+            const doRequest = () => new Promise((resolve, reject) => {
+                const callbackName = `__absensi_jsonp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+                const fullUrl = buildEndpointUrl(url, { ...(params || {}), callback: callbackName });
+                if (!fullUrl) {
+                    reject(new Error("URL kosong"));
+                    return;
+                }
+
+                let settled = false;
+                const cleanup = () => {
+                    try { delete window[callbackName]; } catch (_) { window[callbackName] = undefined; }
+                    if (script && script.parentNode) script.parentNode.removeChild(script);
+                    if (timer) clearTimeout(timer);
+                };
+
+                window[callbackName] = (data) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    resolve(data);
+                };
+
+                const script = document.createElement("script");
+                script.src = fullUrl;
+                script.async = true;
+                script.onerror = () => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    reject(new Error("Gagal memuat data dari server"));
+                };
+
+                const timer = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    reject(new Error("Timeout mengambil data dari server"));
+                }, timeoutMs);
+
+                document.head.appendChild(script);
+            });
+
+            let lastError;
+            for (let i = 0; i <= retries; i++) {
+                try {
+                    return await doRequest();
+                } catch (e) {
+                    lastError = e;
+                    if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+                }
+            }
+            throw lastError;
+        }
+
+        function recordKey(r) {
+            if (!r) return "";
+            return r.recordId || r.id || `${r.employeeId || ""}_${r.timestamp || ""}_${r.type || ""}`;
+        }
+
+        function mergeByKey(localArr, remoteArr) {
+            const out = [];
+            const map = new Map();
+            (Array.isArray(localArr) ? localArr : []).forEach((r) => {
+                const k = recordKey(r);
+                if (!k) return;
+                map.set(k, r);
+            });
+            (Array.isArray(remoteArr) ? remoteArr : []).forEach((r) => {
+                const k = recordKey(r);
+                if (!k) return;
+                map.set(k, { ...map.get(k), ...r, recordId: k });
+            });
+            map.forEach((v) => out.push(v));
+            out.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            return out;
+        }
+
+        async function pullFromSheetAndMerge() {
+            const baseUrl = localStorage.getItem(ENDPOINT_KEY);
+            if (!baseUrl) return { ok: false, reason: "no-endpoint" };
+            if (typeof navigator !== "undefined" && navigator.onLine === false) return { ok: false, reason: "offline" };
+
+            const data = await jsonpRequest(baseUrl, { action: "export" });
+            if (!data || data.status !== "success") return { ok: false, reason: "bad-response" };
+
+            const didBootstrapEmployeesKey = "absensi_bootstrap_employees_v1";
+            if ((!Array.isArray(data.employees) || data.employees.length === 0) && localStorage.getItem(didBootstrapEmployeesKey) !== "1") {
+                try {
+                    const currentEmployees = DB.getEmployees();
+                    if (Array.isArray(currentEmployees) && currentEmployees.length > 0) {
+                        await pushEmployeesToSheet(currentEmployees);
+                    }
+                } catch (_) {}
+                localStorage.setItem(didBootstrapEmployeesKey, "1");
+            }
+
+            if (Array.isArray(data.employees) && data.employees.length > 0) {
+                const normalizedEmployees = data.employees.map((e) => ({
+                    id: String(e.id || e.ID || e.nik || e.NIK || ""),
+                    name: String(e.name || e.nama || e.Nama || ""),
+                    workUnit: String(e.workUnit || e.unitKerja || e.UnitKerja || ""),
+                    role: String(e.role || e.jabatan || e.Jabatan || ""),
+                    password: String(e.password || "123"),
+                    gender: String(e.gender || e.jenisKelamin || e.JenisKelamin || "L"),
+                    phone: String(e.phone || e.noHP || e["No. HP"] || ""),
+                    email: String(e.email || e.Email || ""),
+                    address: String(e.address || e.alamat || e.Alamat || ""),
+                    joinDate: fixSheetDate(String(e.joinDate || e.tanggalBergabung || e.TanggalBergabung || "")),
+                    nik: String(e.nik || e.NIK || ""),
+                    npp: String(e.npp || e.NPP || ""),
+                    golongan: String(e.golongan || e.Golongan || ""),
+                    pangkat: String(e.pangkat || e.Pangkat || ""),
+                    masaKerja: String(e.masaKerja || e.MasaKerja || ""),
+                    birthPlace: String(e.birthPlace || e.tempatLahir || e.TempatLahir || ""),
+                    birthDate: fixSheetDate(String(e.birthDate || e.tanggalLahir || e.TanggalLahir || "")),
+                    religion: String(e.religion || e.agama || e.Agama || ""),
+                    maritalStatus: String(e.maritalStatus || e.statusPerkawinan || e.StatusPerkawinan || ""),
+                    status: String(e.status || e.statusKaryawan || e.StatusKaryawan || "Kontrak"),
+                    photoUrl: String(e.photoUrl || e.foto || e.fotoUrl || e.linkFoto || "")
+                })).filter((e) => e.id);
+                if (normalizedEmployees.length > 0) DB.saveEmployees(normalizedEmployees);
+            }
+
+            if (Array.isArray(data.attendance)) {
+                const local = DB.getAttendance();
+                const merged = mergeByKey(local, data.attendance);
+                DB.saveAttendance(merged);
+            }
+
+            if (data.settings && typeof data.settings === "object") {
+                const local = getSystemSettings();
+                const remote = data.settings || {};
+                const mergedSettings = {
+                    ...local,
+                    ...remote,
+                    kopSurat: { ...local.kopSurat, ...(remote.kopSurat || {}) },
+                    kantor: { ...local.kantor, ...(remote.kantor || {}) },
+                    kehadiran: { ...local.kehadiran, ...(remote.kehadiran || {}) },
+                    organisasi: { ...local.organisasi, ...(remote.organisasi || {}) },
+                    penandatangan: { ...local.penandatangan, ...(remote.penandatangan || {}) },
+                    denda: { ...local.denda, ...(remote.denda || {}) }
+                };
+                saveSystemSettings(mergedSettings);
+            }
+
+            return { ok: true, serverTime: data.serverTime || "" };
+        }
+
+        async function pushEmployeesToSheet(employees) {
+            const url = localStorage.getItem(ENDPOINT_KEY);
+            if (!url) return { ok: false, reason: "no-endpoint" };
+            if (typeof navigator !== "undefined" && navigator.onLine === false) return { ok: false, reason: "offline" };
+            const payload = (Array.isArray(employees) ? employees : []).map((e) => ({
+                id: String(e.id || ""),
+                name: String(e.name || ""),
+                workUnit: String(e.workUnit || ""),
+                role: String(e.role || ""),
+                password: String(e.password || "123"),
+                gender: String(e.gender || "L"),
+                phone: String(e.phone || ""),
+                email: String(e.email || ""),
+                address: String(e.address || ""),
+                joinDate: String(e.joinDate || ""),
+                nik: String(e.nik || ""),
+                npp: String(e.npp || ""),
+                golongan: String(e.golongan || ""),
+                pangkat: String(e.pangkat || ""),
+                masaKerja: String(e.masaKerja || ""),
+                birthPlace: String(e.birthPlace || ""),
+                birthDate: String(e.birthDate || ""),
+                religion: String(e.religion || ""),
+                maritalStatus: String(e.maritalStatus || ""),
+                status: String(e.status || "Kontrak"),
+                photoUrl: String(e.photoUrl || "")
+            })).filter((e) => e.id);
+            try {
+                await fetch(url, {
+                    method: "POST",
+                    mode: "no-cors",
+                    headers: { "Content-Type": "text/plain" },
+                    body: JSON.stringify({ action: "sync_employees", payload })
+                });
+                return { ok: true };
+            } catch (_) {
+                return { ok: false, reason: "network" };
+            }
+        }
+
+        async function pushAttendanceToSheet(records) {
+            const url = localStorage.getItem(ENDPOINT_KEY);
+            if (!url) return { ok: false, reason: "no-endpoint" };
+            if (typeof navigator !== "undefined" && navigator.onLine === false) return { ok: false, reason: "offline" };
+            
+            const payload = (Array.isArray(records) ? records : []).map(r => {
+                const t = String(r.type || "").toLowerCase();
+                const isCheckIn = t === "check-in";
+                const isCheckOut = t === "check-out";
+                const hasJamMasuk = r.jamMasuk && String(r.jamMasuk).length > 0;
+                const hasJamKeluar = r.jamKeluar && String(r.jamKeluar).length > 0;
+
+                const jamMasuk = hasJamMasuk
+                    ? String(r.jamMasuk)
+                    : (isCheckIn ? formatTime(r.timestamp) : "");
+                const jamKeluar = hasJamKeluar
+                    ? String(r.jamKeluar)
+                    : (isCheckOut ? formatTime(r.timestamp) : "");
+
+                const statusMasuk = r.statusMasuk || (isCheckIn ? String(r.status || "") : "");
+                const statusKeluar = r.statusKeluar || (isCheckOut ? String(r.status || "") : "");
+
+                const typeMasuk = r.typeMasuk || (jamMasuk ? "Masuk" : "");
+                const typeKeluar = r.typeKeluar || (jamKeluar ? "Pulang" : "");
+
+                return {
+                    recordId: String(r.id || r.recordId || ""),
+                    employeeId: String(r.employeeId || ""),
+                    employeeName: String(r.employeeName || ""),
+                    workUnit: String(r.workUnit || ""),
+                    timestamp: String(r.timestamp || ""),
+                    jamMasuk,
+                    typeMasuk,
+                    statusMasuk,
+                    jamKeluar,
+                    typeKeluar,
+                    statusKeluar,
+                    shift: String(r.shift || ""),
+                    workLocation: String(r.workLocation || ""),
+                    notes: String(r.notes || ""),
+                    method: String(r.method || "manual_sync"),
+                    leaveType: String(r.leaveType || ""),
+                    latitude: String(r.latitude || r.lat || ""),
+                    longitude: String(r.longitude || r.lng || "")
+                };
+            });
+
+            try {
+                await fetch(url, {
+                    method: "POST",
+                    mode: "no-cors",
+                    headers: { "Content-Type": "text/plain" },
+                    body: JSON.stringify({ action: "sync_attendance", payload })
+                });
+                return { ok: true };
+            } catch (_) {
+                return { ok: false, reason: "network" };
+            }
+        }
+
+        async function pushSettingsToSheet(settings) {
+            const url = localStorage.getItem(ENDPOINT_KEY);
+            if (!url) return { ok: false, reason: "no-endpoint" };
+            if (typeof navigator !== "undefined" && navigator.onLine === false) return { ok: false, reason: "offline" };
+            try {
+                await fetch(url, {
+                    method: "POST",
+                    mode: "no-cors",
+                    headers: { "Content-Type": "text/plain" },
+                    body: JSON.stringify({ action: "sync_settings", payload: settings })
+                });
+                return { ok: true };
+            } catch (_) {
+                return { ok: false, reason: "network" };
+            }
+        }
+
+
+
+        // --- Components ---
+        
+        // 1. Login Component
+        function Login({ onLogin }) {
+            const [password, setPassword] = useState("");
+            const [error, setError] = useState("");
+            const [isLoading, setIsLoading] = useState(false);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                setIsLoading(true);
+                setError("");
+                
+                setTimeout(() => {
+                    if (password === "admin123") { 
+                        onLogin();
+                    } else {
+                        setError("Password yang anda masukkan salah.");
+                        setIsLoading(false);
+                    }
+                }, 600);
+            };
+
+            return React.createElement("div", { className: "min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800 font-sans relative" },
+                React.createElement("div", { className: "w-full max-w-md px-6" },
+                    React.createElement("div", { className: "bg-white p-8 rounded-2xl shadow-2xl" },
+                        // Header
+                        React.createElement("div", { className: "text-center mb-8" },
+                            React.createElement("div", { className: "w-16 h-16 bg-blue-600 rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-blue-500/30 mb-4" },
+                                React.createElement(lucide.LayoutGrid, { size: 32, className: "text-white" })
+                            ),
+                            React.createElement("h2", { className: "text-2xl font-bold text-gray-800" }, "Selamat Datang"),
+                            React.createElement("p", { className: "text-gray-500 text-sm mt-2" }, "Silakan login untuk mengakses Admin Panel")
+                        ),
+
+                        // Form
+                        React.createElement("form", { onSubmit: handleSubmit, className: "space-y-6" },
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-sm font-medium text-gray-700 mb-2" }, "Password Administrator"),
+                                React.createElement("div", { className: "relative" },
+                                    React.createElement("div", { className: "absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none" },
+                                        React.createElement(lucide.Lock, { size: 18, className: "text-gray-400" })
+                                    ),
+                                    React.createElement("input", {
+                                        type: "password",
+                                        className: "w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all",
+                                        placeholder: "••••••••",
+                                        value: password,
+                                        onChange: (e) => setPassword(e.target.value)
+                                    })
+                                )
+                            ),
+
+                            error && React.createElement("div", { className: "p-3 rounded-lg bg-red-50 text-red-600 text-sm flex items-center gap-2" },
+                                React.createElement(lucide.AlertCircle, { size: 16 }),
+                                error
+                            ),
+
+                            React.createElement("button", { 
+                                type: "submit", 
+                                disabled: isLoading,
+                                className: `w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 ${isLoading ? 'opacity-75 cursor-not-allowed' : ''}`
+                            }, 
+                                isLoading ? "Memproses..." : "Masuk Aplikasi",
+                                !isLoading && React.createElement(lucide.ArrowRight, { size: 18 })
+                            )
+                        ),
+                        
+                        React.createElement("div", { className: "mt-8 text-center" },
+                             React.createElement("p", { className: "text-xs text-gray-400" }, "Versi 2.0.0 (Offline Mode)")
+                        )
+                    ),
+                    React.createElement("p", { className: "text-center text-gray-500 text-xs mt-8" }, "© 2026 Absensi Suite. All rights reserved.")
+                ),
+                React.createElement("div", {
+                    className: "absolute bottom-2 right-3 text-[11px] text-gray-400 pointer-events-none select-none"
+                }, "created by s4h33r_78")
+            );
+        }
+
+        // 2. CVViewer Component
+        function CVViewer({ employee, settings, onClose }) {
+            const handlePrint = () => window.print();
+
+            // Helper to calculate tenure
+            const calculateTenure = (joinDate) => {
+                if (!joinDate) return "-";
+                const start = new Date(joinDate);
+                const now = new Date();
+                if (isNaN(start.getTime())) return "-";
+
+                let totalMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+                if (now.getDate() < start.getDate()) {
+                    totalMonths--;
+                }
+                
+                if (totalMonths < 0) return "0 Bulan"; 
+                
+                const finalYears = Math.floor(totalMonths / 12);
+                const finalMonths = totalMonths % 12;
+                
+                let result = [];
+                if (finalYears > 0) result.push(`${finalYears} Tahun`);
+                if (finalMonths > 0) result.push(`${finalMonths} Bulan`);
+                
+                return result.length > 0 ? result.join(" ") : "Kurang dari 1 Bulan";
+            };
+
+            const displayTenure = calculateTenure(employee.joinDate) !== "-" ? calculateTenure(employee.joinDate) : (employee.masaKerja || "-");
+            const kop = (settings && settings.kopSurat) ? settings.kopSurat : DEFAULT_SETTINGS.kopSurat;
+
+            return React.createElement("div", { className: "fixed inset-0 bg-white z-[100] overflow-auto" },
+                React.createElement("div", { className: "max-w-4xl mx-auto p-8 print:p-0" },
+                    // Controls
+                    React.createElement("div", { className: "flex justify-between mb-8 print:hidden" },
+                        React.createElement("button", { onClick: onClose, className: "bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600" }, "Kembali"),
+                        React.createElement("button", { onClick: handlePrint, className: "bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" }, "Cetak / Simpan PDF")
+                    ),
+
+                    React.createElement("div", { className: "bg-white shadow-lg print:shadow-none p-8 min-h-[29.7cm] relative" },
+                        React.createElement("div", { className: "border-b-4 border-double border-gray-800 pb-4 mb-8 flex gap-4 items-center" },
+                            settings.logo ? (function(){
+                                const op = Number(settings.logoOpacity ?? 1);
+                                const br = Number(settings.logoBrightness ?? 1.05);
+                                const co = Number(settings.logoContrast ?? 0.95);
+                                return React.createElement("img", { 
+                                    src: settings.logo, 
+                                    className: "h-20 w-20 object-contain", 
+                                    style: { opacity: op, filter: `brightness(${br}) contrast(${co})` }
+                                });
+                            })() : null,
+                            React.createElement("div", { className: "flex-1 text-center" },
+                                React.createElement("h2", { className: "text-lg font-bold uppercase tracking-wide text-gray-800 leading-tight" }, kop.line1 || ""),
+                                React.createElement("h1", { className: "text-2xl font-extrabold uppercase tracking-wider text-gray-900 leading-tight" }, kop.line2 || ""),
+                                React.createElement("p", { className: "text-sm font-bold uppercase text-gray-700 mt-1" }, kop.line3 || ""),
+                                React.createElement("p", { className: "text-sm font-bold uppercase text-gray-700" }, kop.line4 || ""),
+                                React.createElement("p", { className: "text-xs mt-2 text-gray-600" }, kop.line5 || ""),
+                                React.createElement("p", { className: "text-xs text-gray-600" }, kop.line6 || "")
+                            )
+                        ),
+                        React.createElement("div", { className: "text-center mb-8" },
+                            React.createElement("h2", { className: "text-2xl font-extrabold uppercase tracking-wide underline decoration-2 underline-offset-4 text-gray-900" }, "Profil Karyawan"),
+                            React.createElement("p", { className: "text-gray-500 mt-1" }, "Curriculum Vitae / Biodata")
+                        ),
+
+                        // Body Grid
+                        React.createElement("div", { className: "grid grid-cols-12 gap-8" },
+                            // Left Sidebar (Photo & Personal Info)
+                            React.createElement("div", { className: "col-span-4" },
+                                // Photo
+                                React.createElement("div", { className: "mb-8" },
+                                    employee.photoUrl 
+                                        ? React.createElement("img", { src: employee.photoUrl, className: "w-full aspect-[3/4] object-cover rounded-lg shadow-md border" })
+                                        : React.createElement("div", { className: "w-full aspect-[3/4] bg-gray-100 rounded-lg flex items-center justify-center border text-gray-400" }, "No Photo")
+                                ),
+
+                                // Personal Info Section
+                                React.createElement("div", { className: "mb-8" },
+                                    React.createElement("h3", { className: "text-lg font-bold text-gray-800 border-b-2 border-blue-500 pb-2 mb-4 uppercase" }, "Data Pribadi"),
+                                    React.createElement("div", { className: "space-y-3 text-sm" },
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Tempat, Tanggal Lahir"), React.createElement("span", { className: "font-medium" }, `${employee.birthPlace || "-"}, ${formatDate(employee.birthDate)}`)),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Jenis Kelamin"), React.createElement("span", { className: "font-medium" }, employee.gender === "L" ? "Laki-laki" : "Perempuan")),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Agama"), React.createElement("span", { className: "font-medium" }, employee.religion || "-")),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Status Pernikahan"), React.createElement("span", { className: "font-medium" }, employee.maritalStatus || "-")),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "NIK"), React.createElement("span", { className: "font-medium" }, employee.nik || "-"))
+                                    )
+                                )
+                            ),
+
+                            // Right Main Content
+                            React.createElement("div", { className: "col-span-8" },
+                                // Work Info
+                                React.createElement("div", { className: "mb-8" },
+                                    React.createElement("h3", { className: "text-lg font-bold text-gray-800 border-b-2 border-gray-300 pb-2 mb-4 uppercase" }, "Informasi Kepegawaian"),
+                                    React.createElement("div", { className: "grid grid-cols-2 gap-4 text-sm" },
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "NPP / NIP"), React.createElement("span", { className: "font-medium text-lg" }, employee.npp || "-")),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Status Karyawan"), React.createElement("span", { className: "px-2 py-1 rounded bg-blue-100 text-blue-800 text-xs font-bold inline-block mt-1" }, employee.status || "Kontrak")),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Unit Kerja"), React.createElement("span", { className: "font-medium" }, employee.workUnit || "-")),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Tanggal Bergabung"), React.createElement("span", { className: "font-medium" }, formatDate(employee.joinDate))),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Golongan"), React.createElement("span", { className: "font-medium" }, employee.golongan || "-")),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Pangkat"), React.createElement("span", { className: "font-medium" }, employee.pangkat || "-")),
+                                        React.createElement("div", null, React.createElement("span", { className: "block text-gray-500 text-xs" }, "Masa Kerja"), React.createElement("span", { className: "font-medium" }, displayTenure))
+                                    )
+                                ),
+
+                                // Skills / Competencies (Placeholder or if we add fields later)
+                                React.createElement("div", { className: "mb-8" },
+                                    React.createElement("h3", { className: "text-lg font-bold text-gray-800 border-b-2 border-gray-300 pb-2 mb-4 uppercase" }, "Keahlian & Kompetensi"),
+                                    React.createElement("div", { className: "p-4 bg-gray-50 rounded border border-dashed border-gray-300 text-gray-500 italic text-sm text-center" },
+                                        "Data kompetensi belum ditambahkan."
+                                    )
+                                ),
+
+                                // About / Bio (Auto-generated for now)
+                                React.createElement("div", { className: "mb-8" },
+                                    React.createElement("h3", { className: "text-lg font-bold text-gray-800 border-b-2 border-gray-300 pb-2 mb-4 uppercase" }, "Tentang"),
+                                    React.createElement("p", { className: "text-sm text-gray-600 leading-relaxed" },
+                                        `${employee.name} adalah seorang ${employee.role} di unit ${employee.workUnit}. ` +
+                                        `Bergabung sejak ${formatDate(employee.joinDate)} dan saat ini berstatus sebagai karyawan ${employee.status}. ` +
+                                        `Memiliki golongan ${employee.golongan || "-"} dengan pangkat ${employee.pangkat || "-"}.`
+                                    )
+                                )
+                            )
+                        ),
+
+                        // Footer
+                        React.createElement("div", { className: "mt-12 pt-6 border-t border-gray-200 text-center text-xs text-gray-400" },
+                            `Dokumen ini dicetak otomatis dari Sistem Informasi Absensi pada ${formatDate(new Date(), true)}.`
+                        )
+                    )
+                )
+            );
+        }
+
+        // 3. Dashboard Component (New)
+        function Dashboard() {
+            const [stats, setStats] = useState({
+                totalEmployees: 0,
+                presentToday: 0,
+                lateToday: 0,
+                onLeaveToday: 0,
+                recentActivity: []
+            });
+
+            useEffect(() => {
+                const employees = DB.getEmployees();
+                const attendance = DB.getAttendance();
+                const today = new Date().toISOString().slice(0, 10);
+                
+                const todayRecords = attendance.filter(r => r.timestamp.startsWith(today));
+                const present = new Set(todayRecords.filter(r => r.type === 'check-in').map(r => r.employeeId)).size;
+                const late = new Set(todayRecords.filter(r => r.type === 'check-in' && r.status === 'Terlambat').map(r => r.employeeId)).size;
+                const leave = new Set(todayRecords.filter(r => r.type === 'leave').map(r => r.employeeId)).size;
+
+                setStats({
+                    totalEmployees: employees.length,
+                    presentToday: present,
+                    lateToday: late,
+                    onLeaveToday: leave,
+                    recentActivity: attendance.slice(-5).reverse()
+                });
+            }, []);
+
+            const StatCard = ({ title, value, icon, color, subtext }) => (
+                React.createElement("div", { className: "bg-white p-6 rounded-xl shadow-sm hover:shadow-md transition-all border-l-4 " + color },
+                    React.createElement("div", { className: "flex justify-between items-start" },
+                        React.createElement("div", null,
+                            React.createElement("p", { className: "text-sm font-medium text-gray-500 mb-1" }, title),
+                            React.createElement("h3", { className: "text-2xl font-bold text-gray-800" }, value),
+                            subtext && React.createElement("p", { className: "text-xs text-gray-400 mt-1" }, subtext)
+                        ),
+                        React.createElement("div", { className: `p-3 rounded-lg bg-opacity-10 ${color.replace('border-', 'bg-').replace('500', '100')}` },
+                            icon
+                        )
+                    )
+                )
+            );
+
+            return React.createElement("div", { className: "space-y-6 animate-fade-in" },
+                // Header
+                React.createElement("div", { className: "flex justify-between items-center" },
+                    React.createElement("div", null,
+                        React.createElement("h2", { className: "text-2xl font-bold text-gray-800" }, "Dashboard Ringkasan"),
+                        React.createElement("p", { className: "text-gray-500" }, `Overview aktivitas hari ini, ${new Date().toLocaleDateString('id-ID', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'})}`)
+                    )
+                ),
+
+                // Stats Grid
+                React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" },
+                    React.createElement(StatCard, { 
+                        title: "Total Karyawan", 
+                        value: stats.totalEmployees, 
+                        icon: React.createElement(lucide.Users, { size: 24, className: "text-blue-600" }),
+                        color: "border-blue-500",
+                        subtext: "Terdaftar aktif"
+                    }),
+                    React.createElement(StatCard, { 
+                        title: "Hadir Hari Ini", 
+                        value: stats.presentToday, 
+                        icon: React.createElement(lucide.UserCheck, { size: 24, className: "text-green-600" }),
+                        color: "border-green-500",
+                        subtext: `${Math.round((stats.presentToday / (stats.totalEmployees || 1)) * 100)}% kehadiran`
+                    }),
+                    React.createElement(StatCard, { 
+                        title: "Terlambat", 
+                        value: stats.lateToday, 
+                        icon: React.createElement(lucide.Clock, { size: 24, className: "text-orange-600" }),
+                        color: "border-orange-500",
+                        subtext: "Perlu perhatian"
+                    }),
+                    React.createElement(StatCard, { 
+                        title: "Izin / Cuti", 
+                        value: stats.onLeaveToday, 
+                        icon: React.createElement(lucide.CalendarOff, { size: 24, className: "text-purple-600" }),
+                        color: "border-purple-500",
+                        subtext: "Tidak masuk kerja"
+                    })
+                ),
+
+                // Recent Activity
+                React.createElement("div", { className: "bg-white rounded-xl shadow-sm p-6" },
+                    React.createElement("h3", { className: "text-lg font-bold text-gray-800 mb-4 flex items-center gap-2" },
+                        React.createElement(lucide.Activity, { size: 20 }),
+                        "Aktivitas Terbaru"
+                    ),
+                    React.createElement("div", { className: "space-y-4" },
+                        stats.recentActivity.length === 0 
+                            ? React.createElement("p", { className: "text-gray-400 text-center py-4" }, "Belum ada aktivitas hari ini")
+                            : stats.recentActivity.map((log, idx) => (
+                                React.createElement("div", { key: idx, className: "flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg border-b last:border-0 transition-colors" },
+                                    React.createElement("div", { className: "flex items-center gap-4" },
+                                        React.createElement("div", { className: `p-2 rounded-full ${
+                                            log.type === 'check-in' ? 'bg-green-100 text-green-600' :
+                                            log.type === 'check-out' ? 'bg-red-100 text-red-600' :
+                                            'bg-purple-100 text-purple-600'
+                                        }` },
+                                            log.type === 'check-in' ? React.createElement(lucide.LogIn, { size: 16 }) :
+                                            log.type === 'check-out' ? React.createElement(lucide.LogOut, { size: 16 }) :
+                                            React.createElement(lucide.FileText, { size: 16 })
+                                        ),
+                                        React.createElement("div", null,
+                                            React.createElement("p", { className: "font-medium text-gray-800" }, log.employeeName),
+                                            React.createElement("p", { className: "text-xs text-gray-500" }, 
+                                                `${log.type === 'check-in' ? 'Absen Masuk' : log.type === 'check-out' ? 'Absen Pulang' : 'Pengajuan Izin'} • ${log.workLocation || '-'}`
+                                            )
+                                        )
+                                    ),
+                                    React.createElement("div", { className: "text-right" },
+                                        React.createElement("p", { className: "text-sm font-bold text-gray-700" }, 
+                                            formatTime(log.timestamp)
+                                        ),
+                                        React.createElement("p", { className: "text-xs text-gray-400" }, 
+                                            log.status || '-'
+                                        )
+                                    )
+                                )
+                            ))
+                    )
+                )
+            );
+        }
+
+        // 4. Employee Manager
+        function EmployeeManager() {
+            const [employees, setEmployees] = useState([]);
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [cvEmployee, setCvEmployee] = useState(null);
+            const [editingId, setEditingId] = useState(null);
+            const [formData, setFormData] = useState({ name: "", id: "", role: "", workUnit: "", password: "123", gender: "L", phone: "", email: "", address: "", joinDate: "", nik: "", npp: "", golongan: "", pangkat: "", masaKerja: "", birthPlace: "", birthDate: "", religion: "", maritalStatus: "", status: "Kontrak" });
+            const [syncStatus, setSyncStatus] = useState("");
+            const systemSettings = getSystemSettings();
+
+            useEffect(() => {
+                (async () => {
+                    try { await pullFromSheetAndMerge(); } catch (_) {}
+                    setEmployees(DB.getEmployees());
+                })();
+            }, []);
+
+            const downloadTemplate = () => {
+                const wb = XLSX.utils.book_new();
+                const headers = [
+                    "ID Karyawan", "Nama Karyawan", "Unit Kerja", "Jabatan", "Password (Default: 123)",
+                    "Jenis Kelamin (L/P)", "No. HP", "Email", "Alamat", "Tanggal Bergabung (YYYY-MM-DD)",
+                    "NIK", "NPP", "Golongan", "Pangkat", "Masa Kerja",
+                    "Tempat Lahir", "Tanggal Lahir (YYYY-MM-DD)", "Agama", "Status Perkawinan", "Status Karyawan",
+                    "Link Foto"
+                ];
+                const example = [
+                    "AM2-999", "Contoh Nama", "Kantor Cabang", "Staf", "123",
+                    "L", "081234567890", "contoh@email.com", "Jl. Merdeka No. 1", "2024-01-01",
+                    "3201010101010001", "NPP-999", "III/a", "Penata Muda", "5 Tahun",
+                    "Jakarta", "1990-01-01", "Islam", "Menikah", "Tetap",
+                    "https://drive.google.com/uc?export=view&id=FILE_ID"
+                ];
+                const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+                XLSX.utils.book_append_sheet(wb, ws, "Template Karyawan");
+                XLSX.writeFile(wb, "Template_Import_Karyawan_Lengkap.xlsx");
+            };
+
+            const exportEmployeesExcel = () => {
+                const wb = XLSX.utils.book_new();
+                const exportData = employees.map(e => ({
+                    "ID Karyawan": e.id,
+                    "Nama Karyawan": e.name,
+                    "Unit Kerja": e.workUnit,
+                    "Jabatan": e.role,
+                    "Password (Default: 123)": e.password,
+                    "Jenis Kelamin (L/P)": e.gender,
+                    "No. HP": e.phone,
+                    "Email": e.email,
+                    "Alamat": e.address,
+                    "Tanggal Bergabung (YYYY-MM-DD)": e.joinDate,
+                    "NIK": e.nik,
+                    "NPP": e.npp,
+                    "Golongan": e.golongan,
+                    "Pangkat": e.pangkat,
+                    "Masa Kerja": e.masaKerja,
+                    "Tempat Lahir": e.birthPlace,
+                    "Tanggal Lahir (YYYY-MM-DD)": e.birthDate,
+                    "Agama": e.religion,
+                    "Status Perkawinan": e.maritalStatus,
+                    "Status Karyawan": e.status,
+                    "Link Foto": e.photoUrl || ""
+                }));
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                XLSX.utils.book_append_sheet(wb, ws, "Data Karyawan");
+                XLSX.writeFile(wb, `Data_Karyawan_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            };
+
+            const handleImportEmployees = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: "binary" });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        const data = XLSX.utils.sheet_to_json(ws);
+
+                        const newEmployees = data.map(row => ({
+                            id: String(row["ID Karyawan"] || row["ID"] || row["id"] || row["NIK"] || ""),
+                            name: String(row["Nama Karyawan"] || row["Nama"] || row["name"] || ""),
+                            workUnit: String(row["Unit Kerja"] || row["Divisi"] || ""),
+                            role: String(row["Jabatan"] || ""),
+                            password: String(row["Password (Default: 123)"] || row["Password"] || "123"),
+                            gender: String(row["Jenis Kelamin (L/P)"] || "L"),
+                            phone: String(row["No. HP"] || ""),
+                            email: String(row["Email"] || ""),
+                            address: String(row["Alamat"] || ""),
+                            joinDate: String(row["Tanggal Bergabung (YYYY-MM-DD)"] || ""),
+                            nik: String(row["NIK"] || ""),
+                            npp: String(row["NPP"] || ""),
+                            golongan: String(row["Golongan"] || ""),
+                            pangkat: String(row["Pangkat"] || ""),
+                            masaKerja: String(row["Masa Kerja"] || ""),
+                            birthPlace: String(row["Tempat Lahir"] || ""),
+                            birthDate: String(row["Tanggal Lahir (YYYY-MM-DD)"] || ""),
+                            religion: String(row["Agama"] || ""),
+                            maritalStatus: String(row["Status Perkawinan"] || ""),
+                            status: String(row["Status Karyawan"] || "Kontrak"),
+                            photoUrl: String(row["Link Foto"] || row["Foto URL"] || row["Photo URL"] || row["Foto"] || "")
+                        })).filter(e => e.id);
+
+                        const current = DB.getEmployees();
+                        const merged = [...current];
+                        const currentIds = new Set(current.map(e => e.id));
+
+                        let addedCount = 0;
+                        let updatedCount = 0;
+                        
+                        newEmployees.forEach(e => {
+                            if (currentIds.has(e.id)) {
+                                const idx = merged.findIndex(m => m.id === e.id);
+                                merged[idx] = { ...merged[idx], ...e };
+                                updatedCount++;
+                            } else {
+                                merged.push(e);
+                                addedCount++;
+                            }
+                        });
+
+                        DB.saveEmployees(merged);
+                        setEmployees(merged);
+                        alert(`Import Berhasil!\nDitambahkan: ${addedCount}\nDiperbarui: ${updatedCount}`);
+                    } catch (err) {
+                        console.error(err);
+                        alert("Gagal membaca file Excel. Pastikan format sesuai template.");
+                    }
+                };
+                reader.readAsBinaryString(file);
+                e.target.value = null; // Reset input
+            };
+
+            const handleSave = (e) => {
+                e.preventDefault();
+                let updated;
+                if (editingId) {
+                    updated = employees.map(emp => emp.id === editingId ? { ...formData, id: editingId } : emp);
+                } else {
+                    updated = [...employees, { ...formData, id: formData.id || Date.now().toString() }];
+                }
+                setEmployees(updated);
+                DB.saveEmployees(updated);
+                if (localStorage.getItem(ENDPOINT_KEY)) {
+                    setSyncStatus("Mengirim ke Google Sheet...");
+                    pushEmployeesToSheet(updated).then((r) => {
+                        if (r && r.ok) setSyncStatus("Tersimpan ke Google Sheet");
+                        else setSyncStatus("Mode offline");
+                        setTimeout(() => setSyncStatus(""), 1500);
+                    });
+                }
+                closeModal();
+            };
+
+            const handleDelete = (id) => {
+                if (confirm("Hapus karyawan ini?")) {
+                    const updated = employees.filter(e => e.id !== id);
+                    setEmployees(updated);
+                    DB.saveEmployees(updated);
+                }
+            };
+
+            const handleReset = () => {
+                if (confirm("Reset data karyawan ke default? Data karyawan saat ini akan ditimpa.")) {
+                    const defaults = DB.resetEmployees();
+                    setEmployees(defaults);
+                }
+            };
+
+            const handlePhotoUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    // Compress and Resize Image
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            let width = img.width;
+                            let height = img.height;
+                            
+                            // Max dimension 200px to keep size < 50k chars (Google Sheet Cell Limit)
+                            const MAX_SIZE = 200; 
+                            if (width > height) {
+                                if (width > MAX_SIZE) {
+                                    height *= MAX_SIZE / width;
+                                    width = MAX_SIZE;
+                                }
+                            } else {
+                                if (height > MAX_SIZE) {
+                                    width *= MAX_SIZE / height;
+                                    height = MAX_SIZE;
+                                }
+                            }
+                            
+                            canvas.width = width;
+                            canvas.height = height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+                            
+                            // Compress to JPEG 0.7 quality
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                            
+                            // Check size
+                            if (dataUrl.length > 49000) {
+                                alert("Ukuran foto masih terlalu besar setelah dikompresi. Silakan gunakan foto lain.");
+                                return;
+                            }
+                            
+                            setFormData({ ...formData, photoUrl: dataUrl });
+                        };
+                        img.src = event.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const openModal = (emp = null) => {
+                if (emp) {
+                    setEditingId(emp.id);
+                    setFormData({ 
+                        ...emp, 
+                        password: emp.password || "123",
+                        gender: emp.gender || "L",
+                        phone: emp.phone || "",
+                        email: emp.email || "",
+                        address: emp.address || "",
+                        joinDate: emp.joinDate || "",
+                        nik: emp.nik || "",
+                        birthPlace: emp.birthPlace || "",
+                        birthDate: emp.birthDate || "",
+                        religion: emp.religion || "",
+                        maritalStatus: emp.maritalStatus || "",
+                        status: emp.status || "Kontrak"
+                    });
+                } else {
+                    setEditingId(null);
+                    setFormData({ name: "", id: "", role: "", workUnit: "", password: "123", gender: "L", phone: "", email: "", address: "", joinDate: "", nik: "", birthPlace: "", birthDate: "", religion: "", maritalStatus: "", status: "Kontrak" });
+                }
+                setIsModalOpen(true);
+            };
+
+            const closeModal = () => setIsModalOpen(false);
+
+            return React.createElement("div", { className: "bg-white p-6 rounded-xl shadow-sm" },
+                React.createElement("div", { className: "flex justify-between items-center mb-6" },
+                    React.createElement("h2", { className: "text-xl font-bold" }, "Data Karyawan"),
+                    React.createElement("div", { className: "flex gap-2" },
+                        React.createElement("button", { onClick: downloadTemplate, className: "bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm" }, "📥 Template"),
+                        React.createElement("button", { onClick: () => document.getElementById('importExcelInput').click(), className: "bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 text-sm" }, "📂 Import"),
+                        React.createElement("input", { 
+                            id: "importExcelInput", 
+                            type: "file", 
+                            accept: ".xlsx, .xls", 
+                            className: "hidden", 
+                            onChange: handleImportEmployees 
+                        }),
+                        React.createElement("button", { onClick: exportEmployeesExcel, className: "bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm" }, "📤 Export"),
+                        React.createElement("button", { onClick: handleReset, className: "bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm" }, "↺ Reset"),
+                        React.createElement("button", { onClick: () => openModal(), className: "bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm" }, "+ Tambah")
+                    )
+                ),
+                syncStatus ? React.createElement("div", { className: "mb-4 text-xs text-orange-600 font-medium" }, syncStatus) : null,
+                React.createElement("div", { className: "overflow-x-auto" },
+                    React.createElement("table", { className: "w-full text-left border-collapse" },
+                        React.createElement("thead", { className: "bg-gray-50 border-b" },
+                            React.createElement("tr", null,
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "ID"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Nama"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "NPP"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Jabatan"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Unit Kerja"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Kontak"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600 text-right" }, "Aksi")
+                            )
+                        ),
+                        React.createElement("tbody", null,
+                            employees.length === 0 ? 
+                            React.createElement("tr", null, React.createElement("td", { colSpan: 7, className: "p-4 text-center text-gray-500" }, "Belum ada data karyawan")) :
+                            employees.map(emp => 
+                                React.createElement("tr", { key: emp.id, className: "border-b hover:bg-gray-50" },
+                                    React.createElement("td", { className: "p-3 text-sm" }, emp.id),
+                                    React.createElement("td", { className: "p-3 text-sm" }, 
+                                        emp.photoUrl 
+                                            ? React.createElement("img", { src: emp.photoUrl, className: "w-8 h-8 rounded-full object-cover border" })
+                                            : React.createElement("div", { className: "w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500" }, "?")
+                                    ),
+                                    React.createElement("td", { className: "p-3 text-sm font-medium" }, emp.name),
+                                    React.createElement("td", { className: "p-3 text-sm" }, emp.npp || "-"),
+                                    React.createElement("td", { className: "p-3 text-sm" }, emp.role),
+                                    React.createElement("td", { className: "p-3 text-sm" }, emp.workUnit),
+                                    React.createElement("td", { className: "p-3 text-sm text-gray-500" }, emp.phone || "-"),
+                                    React.createElement("td", { className: "p-3 text-right space-x-2" },
+                                        React.createElement("button", { onClick: () => setCvEmployee(emp), className: "text-green-600 hover:text-green-800 text-sm" }, "Lihat CV"),
+                                        React.createElement("button", { onClick: () => openModal(emp), className: "text-blue-600 hover:text-blue-800 text-sm" }, "Edit"),
+                                        React.createElement("button", { onClick: () => handleDelete(emp.id), className: "text-red-600 hover:text-red-800 text-sm" }, "Hapus")
+                                    )
+                                )
+                            )
+                        )
+                    )
+                ),
+                // CV Viewer Modal
+                cvEmployee && React.createElement(CVViewer, {
+                    employee: cvEmployee,
+                    settings: systemSettings,
+                    onClose: () => setCvEmployee(null)
+                }),
+
+                // Modal
+                isModalOpen && React.createElement("div", { className: "fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" },
+                    React.createElement("div", { className: "bg-white p-6 rounded-xl w-full max-w-md" },
+                        React.createElement("h3", { className: "text-lg font-bold mb-4" }, editingId ? "Edit Karyawan" : "Tambah Karyawan"),
+                        React.createElement("form", { onSubmit: handleSave, className: "space-y-4" },
+                            // Photo Upload
+                            React.createElement("div", { className: "flex items-start gap-4 border-b pb-4" },
+                                formData.photoUrl 
+                                    ? React.createElement("img", { src: formData.photoUrl, className: "w-16 h-16 object-cover rounded-full border" })
+                                    : React.createElement("div", { className: "w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center text-gray-400" }, "Foto"),
+                                React.createElement("div", { className: "flex-1 space-y-2" },
+                                    React.createElement("label", { className: "block text-sm font-medium text-gray-700 mb-1" }, "Foto Profil (Max 500KB)"),
+                                    React.createElement("input", { type: "file", accept: "image/*", onChange: handlePhotoUpload, className: "text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" }),
+                                    React.createElement("input", { className: "w-full p-2 border rounded text-xs", placeholder: "atau tempel Link Foto (mis. Google Drive)", value: formData.photoUrl || "", onChange: e => setFormData({ ...formData, photoUrl: e.target.value }) })
+                                )
+                            ),
+
+                            React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                                React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "ID Karyawan", value: formData.id, onChange: e => setFormData({...formData, id: e.target.value}), required: true }),
+                                React.createElement("div", { className: "grid grid-cols-2 gap-2" },
+                                    React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "NIK KTP", value: formData.nik, onChange: e => setFormData({...formData, nik: e.target.value}) }),
+                                    React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "NPP", value: formData.npp, onChange: e => setFormData({...formData, npp: e.target.value}) })
+                                )
+                            ),
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Nama Lengkap", value: formData.name, onChange: e => setFormData({...formData, name: e.target.value}), required: true }),
+                            
+                            React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                                React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Tempat Lahir", value: formData.birthPlace, onChange: e => setFormData({...formData, birthPlace: e.target.value}) }),
+                                React.createElement("input", { type: "date", className: "w-full p-2 border rounded", placeholder: "Tanggal Lahir", value: formData.birthDate, onChange: e => {
+                                    const b = e.target.value;
+                                    const j = formData.joinDate;
+                                    let n = formData.npp;
+                                    if (b && j) {
+                                        const [by, bm, bd] = b.split('-');
+                                        const [jy, jm] = j.split('-');
+                                        if (by && bm && bd && jy && jm) {
+                                            n = by.slice(2) + bd + bm + jm + jy.slice(2);
+                                        }
+                                    }
+                                    setFormData({...formData, birthDate: b, npp: n});
+                                } })
+                            ),
+
+                            React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                                React.createElement("select", { className: "w-full p-2 border rounded", value: formData.gender, onChange: e => setFormData({...formData, gender: e.target.value}) },
+                                    React.createElement("option", { value: "L" }, "Laki-laki"),
+                                    React.createElement("option", { value: "P" }, "Perempuan")
+                                ),
+                                React.createElement("select", { className: "w-full p-2 border rounded", value: formData.religion, onChange: e => setFormData({...formData, religion: e.target.value}) },
+                                    React.createElement("option", { value: "" }, "Pilih Agama"),
+                                    React.createElement("option", { value: "Islam" }, "Islam"),
+                                    React.createElement("option", { value: "Kristen" }, "Kristen"),
+                                    React.createElement("option", { value: "Katolik" }, "Katolik"),
+                                    React.createElement("option", { value: "Hindu" }, "Hindu"),
+                                    React.createElement("option", { value: "Buddha" }, "Buddha"),
+                                    React.createElement("option", { value: "Konghucu" }, "Konghucu")
+                                )
+                            ),
+
+                            React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                                React.createElement("select", { className: "w-full p-2 border rounded", value: formData.maritalStatus, onChange: e => setFormData({...formData, maritalStatus: e.target.value}) },
+                                    React.createElement("option", { value: "" }, "Status Pernikahan"),
+                                    React.createElement("option", { value: "Belum Menikah" }, "Belum Menikah"),
+                                    React.createElement("option", { value: "Menikah" }, "Menikah"),
+                                    React.createElement("option", { value: "Cerai" }, "Cerai")
+                                ),
+                                React.createElement("select", { className: "w-full p-2 border rounded", value: formData.status, onChange: e => setFormData({...formData, status: e.target.value}) },
+                                    React.createElement("option", { value: "Kontrak" }, "Kontrak"),
+                                    React.createElement("option", { value: "Tetap" }, "Tetap"),
+                                    React.createElement("option", { value: "Magang" }, "Magang")
+                                )
+                            ),
+
+                            React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                                React.createElement(React.Fragment, null,
+                                    React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Jabatan", list: "jobTitleList", value: formData.role, onChange: e => setFormData({...formData, role: e.target.value}) }),
+                                    React.createElement("datalist", { id: "jobTitleList" },
+                                        (systemSettings.organisasi.jabatanTersedia || []).map((j) => React.createElement("option", { key: j, value: j }))
+                                    )
+                                ),
+                                React.createElement("select", { className: "w-full p-2 border rounded", value: formData.workUnit, onChange: e => setFormData({...formData, workUnit: e.target.value}) },
+                                    React.createElement("option", { value: "" }, "Pilih Unit Kerja"),
+                                    (systemSettings.organisasi.unitKerjaTersedia || []).map((u) => React.createElement("option", { key: u, value: u }, u))
+                                )
+                            ),
+
+                            React.createElement("div", { className: "grid grid-cols-3 gap-4" },
+                                React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Golongan", value: formData.golongan, onChange: e => setFormData({...formData, golongan: e.target.value}) }),
+                                React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Pangkat", value: formData.pangkat, onChange: e => setFormData({...formData, pangkat: e.target.value}) }),
+                                React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Masa Kerja", value: formData.masaKerja, onChange: e => setFormData({...formData, masaKerja: e.target.value}) })
+                            ),
+
+                            React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                                React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "No. HP/WA", value: formData.phone, onChange: e => setFormData({...formData, phone: e.target.value}) }),
+                                React.createElement("input", { type: "email", className: "w-full p-2 border rounded", placeholder: "Email", value: formData.email, onChange: e => setFormData({...formData, email: e.target.value}) })
+                            ),
+                            
+                            React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                                React.createElement("textarea", { className: "w-full p-2 border rounded", placeholder: "Alamat Lengkap", rows: 2, value: formData.address, onChange: e => setFormData({...formData, address: e.target.value}) }),
+                                React.createElement("div", { className: "space-y-2" },
+                                    React.createElement("input", { type: "date", className: "w-full p-2 border rounded", placeholder: "Tanggal Masuk", value: formData.joinDate, onChange: e => {
+                                        const j = e.target.value;
+                                        const b = formData.birthDate;
+                                        let n = formData.npp;
+                                        let mk = formData.masaKerja;
+                                        if (b && j) {
+                                            const [by, bm, bd] = b.split('-');
+                                            const [jy, jm] = j.split('-');
+                                            if (by && bm && bd && jy && jm) {
+                                                n = by.slice(2) + bd + bm + jm + jy.slice(2);
+                                            }
+                                        }
+                                        
+                                        if (j) {
+                                            const start = new Date(j);
+                                            const now = new Date();
+                                            if (!isNaN(start.getTime())) {
+                                                let totalMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+                                                if (now.getDate() < start.getDate()) totalMonths--;
+                                                
+                                                if (totalMonths < 0) mk = "0 Bulan";
+                                                else {
+                                                    const fy = Math.floor(totalMonths / 12);
+                                                    const fm = totalMonths % 12;
+                                                    let res = [];
+                                                    if (fy > 0) res.push(`${fy} Tahun`);
+                                                    if (fm > 0) res.push(`${fm} Bulan`);
+                                                    mk = res.length > 0 ? res.join(" ") : "Kurang dari 1 Bulan";
+                                                }
+                                            }
+                                        }
+
+                                        setFormData({...formData, joinDate: j, npp: n, masaKerja: mk});
+                                    } }),
+                                    React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Password (Default: 123)", value: formData.password, onChange: e => setFormData({...formData, password: e.target.value || "123"}) })
+                                )
+                            ),
+                            React.createElement("div", { className: "flex justify-end gap-2 mt-6" },
+                                React.createElement("button", { type: "button", onClick: closeModal, className: "px-4 py-2 text-gray-600 hover:bg-gray-100 rounded" }, "Batal"),
+                                React.createElement("button", { type: "submit", className: "px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700" }, "Simpan")
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        // 3. Attendance Manager
+        function AttendanceManager() {
+            const [records, setRecords] = useState([]);
+            const [filterDate, setFilterDate] = useState(new Date().toISOString().slice(0, 10));
+            const [filterType, setFilterType] = useState("absensi");
+            const [isSyncing, setIsSyncing] = useState(false);
+
+            useEffect(() => {
+                loadData();
+            }, []);
+
+            const loadData = () => {
+                setRecords(DB.getAttendance());
+            };
+
+            const handleSync = async () => {
+                if (!localStorage.getItem(ENDPOINT_KEY)) {
+                    alert("URL Google Apps Script belum diset di Pengaturan.");
+                    return;
+                }
+                if (!confirm("Kirim data absensi lokal ke Google Sheet? Data di sheet akan disesuaikan dengan data lokal.")) return;
+                
+                setIsSyncing(true);
+                const res = await pushAttendanceToSheet(records);
+                setIsSyncing(false);
+                
+                if (res.ok) alert("Sinkronisasi Berhasil!");
+                else alert("Gagal sinkron: " + (res.reason || "Error jaringan/server"));
+            };
+
+            const handleDelete = (index) => {
+                if (confirm("Hapus log absensi ini?")) {
+                    const newRecords = [...records];
+                    newRecords.splice(index, 1); // Remove at index (since no unique ID usually, be careful. Best to add ID if missing)
+                    setRecords(newRecords);
+                    DB.saveAttendance(newRecords);
+                    
+                    // Auto-sync deletion if possible
+                    if (localStorage.getItem(ENDPOINT_KEY)) {
+                        pushAttendanceToSheet(newRecords);
+                    }
+                }
+            };
+
+            const downloadAttendanceTemplate = () => {
+                const template = [
+                    {
+                        "ID Karyawan": "AM2-001",
+                        "Tanggal (YYYY-MM-DD)": "2024-01-01",
+                        "Jam (HH:mm)": "08:00",
+                        "Tipe (Masuk/Pulang)": "Masuk",
+                        "Status": "Hadir",
+                        "Keterangan": "Tepat Waktu"
+                    }
+                ];
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.json_to_sheet(template);
+                XLSX.utils.book_append_sheet(wb, ws, "Template Absensi");
+                XLSX.writeFile(wb, "Template_Import_Absensi.xlsx");
+            };
+
+            const handleImportAttendance = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: "binary" });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        const data = XLSX.utils.sheet_to_json(ws);
+
+                        const employees = DB.getEmployees();
+                        const employeeMap = new Map((employees || []).map((emp) => [emp.id, emp]));
+
+                        const newLogs = data.map(row => {
+                            const date = row["Tanggal (YYYY-MM-DD)"];
+                            const time = row["Jam (HH:mm)"];
+                            const typeRaw = (row["Tipe (Masuk/Pulang)"] || "").toLowerCase();
+                            let type = "check-in";
+                            if (typeRaw.includes("pulang") || typeRaw.includes("out")) type = "check-out";
+                            const empId = String(row["ID Karyawan"] || "").trim();
+                            if (!empId || !date || !time) return null;
+
+                            const emp = employeeMap.get(empId);
+                            const ts = String(date).includes("T") ? String(date) : `${date} ${time}`;
+
+                            return {
+                                id: Date.now() + Math.random(),
+                                employeeId: empId,
+                                employeeName: emp ? emp.name : "Unknown",
+                                timestamp: ts,
+                                type: type,
+                                status: row["Status"] || "Hadir",
+                                notes: row["Keterangan"] || "Imported",
+                                method: "Manual Import"
+                            };
+                        }).filter(Boolean);
+
+                        const current = DB.getAttendance();
+                        const merged = [...(Array.isArray(current) ? current : []), ...newLogs];
+                        DB.saveAttendance(merged);
+                        setRecords(merged);
+                        alert(`Berhasil mengimpor ${newLogs.length} data absensi.`);
+
+                        if (localStorage.getItem(ENDPOINT_KEY)) {
+                            pushAttendanceToSheet(merged);
+                        }
+                    } catch (err) {
+                        alert("Gagal mengimpor file: " + err.message);
+                    }
+                };
+                reader.readAsBinaryString(file);
+                e.target.value = null;
+            };
+
+            const filteredRecords = records
+                .filter(r => r.timestamp.startsWith(filterDate))
+                .filter(r => {
+                    if (filterType === "absensi") return r.type === "check-in" || r.type === "check-out";
+                    if (filterType === "pengajuan") return r.type === "leave";
+                    return true;
+                })
+                .reverse();
+
+            return React.createElement("div", { className: "bg-white p-6 rounded-xl shadow-sm" },
+                React.createElement("div", { className: "flex justify-between items-center mb-6" },
+                    React.createElement("h2", { className: "text-xl font-bold" }, "Data Absensi"),
+                    React.createElement("div", { className: "flex items-center gap-3" },
+                        React.createElement("div", { className: "flex gap-2" },
+                            React.createElement("button", { onClick: downloadAttendanceTemplate, className: "bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700 text-sm" }, "📥 Template"),
+                            React.createElement("button", { onClick: () => document.getElementById('importAttInput').click(), className: "bg-orange-600 text-white px-3 py-2 rounded-lg hover:bg-orange-700 text-sm" }, "📂 Import"),
+                            React.createElement("button", { 
+                                onClick: handleSync, 
+                                disabled: isSyncing,
+                                className: "bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 text-sm flex items-center gap-1" 
+                            }, isSyncing ? "⏳ Syncing..." : "🔄 Sync ke Server"),
+                            React.createElement("input", { 
+                                id: "importAttInput", 
+                                type: "file", 
+                                accept: ".xlsx, .xls", 
+                                className: "hidden", 
+                                onChange: handleImportAttendance 
+                            })
+                        ),
+                        React.createElement("div", { className: "flex bg-gray-100 p-1 rounded-lg" },
+                            React.createElement("button", {
+                                onClick: () => setFilterType("absensi"),
+                                className: `px-3 py-2 rounded-md text-sm font-medium transition-all ${filterType === "absensi" ? "bg-white shadow text-blue-600" : "text-gray-500 hover:text-gray-700"}`
+                            }, "Absensi"),
+                            React.createElement("button", {
+                                onClick: () => setFilterType("pengajuan"),
+                                className: `px-3 py-2 rounded-md text-sm font-medium transition-all ${filterType === "pengajuan" ? "bg-white shadow text-blue-600" : "text-gray-500 hover:text-gray-700"}`
+                            }, "Pengajuan"),
+                            React.createElement("button", {
+                                onClick: () => setFilterType("all"),
+                                className: `px-3 py-2 rounded-md text-sm font-medium transition-all ${filterType === "all" ? "bg-white shadow text-blue-600" : "text-gray-500 hover:text-gray-700"}`
+                            }, "Semua")
+                        ),
+                        React.createElement("input", {
+                            type: "date",
+                            value: filterDate,
+                            onChange: (e) => setFilterDate(e.target.value),
+                            className: "p-2 border rounded-lg"
+                        })
+                    )
+                ),
+                React.createElement("div", { className: "overflow-x-auto" },
+                    React.createElement("table", { className: "w-full text-left border-collapse" },
+                        React.createElement("thead", { className: "bg-gray-50 border-b" },
+                            React.createElement("tr", null,
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Waktu"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Nama"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Detail"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Tipe"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600" }, "Status"),
+                                React.createElement("th", { className: "p-3 text-sm font-semibold text-gray-600 text-right" }, "Aksi")
+                            )
+                        ),
+                        React.createElement("tbody", null,
+                            filteredRecords.length === 0 ? 
+                            React.createElement("tr", null, React.createElement("td", { colSpan: 6, className: "p-4 text-center text-gray-500" }, "Tidak ada data pada tanggal ini")) :
+                            filteredRecords.map((rec, idx) => {
+                                const typeLabel = rec.type === 'check-in'
+                                    ? 'Masuk'
+                                    : (rec.type === 'check-out'
+                                        ? 'Pulang'
+                                        : (rec.type === 'leave'
+                                            ? 'Pengajuan'
+                                            : (rec.type || '-')));
+                                const typeBadgeClass = rec.type === 'check-in'
+                                    ? 'bg-green-100 text-green-700'
+                                    : (rec.type === 'check-out'
+                                        ? 'bg-red-100 text-red-700'
+                                        : (rec.type === 'leave'
+                                            ? 'bg-purple-100 text-purple-700'
+                                            : 'bg-gray-100 text-gray-700'));
+
+                                return React.createElement("tr", { key: idx, className: "border-b hover:bg-gray-50" },
+                                    React.createElement("td", { className: "p-3 text-sm" }, formatTime(rec.timestamp)),
+                                    React.createElement("td", { className: "p-3 text-sm font-medium" }, rec.employeeName),
+                                    React.createElement("td", { className: "p-3 text-sm" }, 
+                                        rec.type === "leave"
+                                            ? React.createElement(React.Fragment, null,
+                                                React.createElement("div", { className: "font-medium" }, (rec.leaveType || "-").toString().toUpperCase()),
+                                                rec.notes && React.createElement("div", { className: "text-xs text-gray-400 italic" }, `"${rec.notes}"`)
+                                            )
+                                            : React.createElement(React.Fragment, null,
+                                                React.createElement("div", { className: "font-medium" }, rec.shift || "-"),
+                                                React.createElement("div", { className: "text-xs text-gray-500" }, rec.workLocation || "-"),
+                                                rec.notes && React.createElement("div", { className: "text-xs text-gray-400 italic" }, `"${rec.notes}"`)
+                                            )
+                                    ),
+                                    React.createElement("td", { className: "p-3 text-sm" }, 
+                                        React.createElement("span", { className: `px-2 py-1 rounded-full text-xs font-bold ${typeBadgeClass}` }, typeLabel)
+                                    ),
+                                    React.createElement("td", { className: "p-3 text-sm" }, rec.type === "leave" ? (rec.leaveType || "-") : (rec.status || "-")),
+                                    React.createElement("td", { className: "p-3 text-right" },
+                                        React.createElement("button", { onClick: () => handleDelete(records.indexOf(rec)), className: "text-red-600 hover:text-red-800 text-sm" }, "Hapus")
+                                    )
+                                );
+                            })
+                        )
+                    )
+                )
+            );
+        }
+
+        // 4. Settings Manager
+        function SettingsManager() {
+            const [endpoint, setEndpoint] = useState(localStorage.getItem(ENDPOINT_KEY) || "");
+            const [settings, setSettings] = useState(getSystemSettings());
+            const [employees, setEmployees] = useState([]);
+            const [msg, setMsg] = useState("");
+            const [status, setStatus] = useState("");
+
+            useEffect(() => {
+                (async () => {
+                    try { await pullFromSheetAndMerge(); } catch (_) {}
+                    setSettings(getSystemSettings());
+                    const emps = DB.getEmployees();
+                    emps.sort((a, b) => a.name.localeCompare(b.name));
+                    setEmployees(emps);
+                })();
+            }, []);
+
+            const backupData = () => {
+                const data = {
+                    employees: DB.getEmployees(),
+                    attendance: DB.getAttendance(),
+                    settings: getSystemSettings(),
+                    exportedAt: new Date().toISOString()
+                };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `backup_absensi_full_${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+            };
+
+            const restoreData = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                if (!confirm("PERINGATAN: Memulihkan data akan menimpa data saat ini. Lanjutkan?")) {
+                    e.target.value = null;
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const data = JSON.parse(evt.target.result);
+                        if (data.employees) DB.saveEmployees(data.employees);
+                        if (data.attendance) DB.saveAttendance(data.attendance);
+                        if (data.settings) saveSystemSettings(data.settings);
+                        alert("Data berhasil dipulihkan! Halaman akan dimuat ulang.");
+                        window.location.reload();
+                    } catch (err) {
+                        alert("Gagal memulihkan data: " + err.message);
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = null;
+            };
+
+            const formatNpp = (val) => {
+                 if (!val) return "NPP. -";
+                 const s = String(val).trim();
+                 // Jika sudah ada prefix NPP/NIP, biarkan atau sesuaikan
+                 if (/^npp[\.\s]/i.test(s)) return s;
+                 if (/^nip[\.\s]/i.test(s)) return s.replace(/^nip[\.\s]*/i, "NPP. ");
+                 return `NPP. ${s}`;
+             };
+
+            const handleImageUpload = (e, field, section = 'penandatangan') => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        let w = img.width;
+                        let h = img.height;
+                        const MAX = 300;
+                        if (w > h) {
+                            if (w > MAX) {
+                                h = Math.round(h * (MAX / w));
+                                w = MAX;
+                            }
+                        } else {
+                            if (h > MAX) {
+                                w = Math.round(w * (MAX / h));
+                                h = MAX;
+                            }
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w;
+                        canvas.height = h;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = "#ffffff";
+                        ctx.fillRect(0, 0, w, h);
+                        ctx.drawImage(img, 0, 0, w, h);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                        if (dataUrl.length > 49000) {
+                            alert("Ukuran gambar terlalu besar setelah kompresi. Gunakan gambar lebih kecil.");
+                            return;
+                        }
+                        setSettings(p => {
+                            if (section === 'root') {
+                                return { ...p, [field]: dataUrl };
+                            }
+                            return {
+                                ...p,
+                                [section]: {
+                                    ...(p[section] || {}),
+                                    [field]: dataUrl
+                                }
+                            };
+                        });
+                    };
+                    img.src = evt.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const convertImageBase64ToWhite = (dataUrl, quality = 0.7) => new Promise((resolve, reject) => {
+                try {
+                    const img = new Image();
+                    img.onload = () => {
+                        const w = img.width || 300;
+                        const h = img.height || 300;
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w;
+                        canvas.height = h;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = "#ffffff";
+                        ctx.fillRect(0, 0, w, h);
+                        ctx.drawImage(img, 0, 0, w, h);
+                        const out = canvas.toDataURL('image/jpeg', quality);
+                        resolve(out);
+                    };
+                    img.onerror = () => resolve(dataUrl);
+                    img.src = dataUrl;
+                } catch (e) {
+                    resolve(dataUrl);
+                }
+            });
+
+             const handleSave = (e) => {
+                e.preventDefault();
+                localStorage.setItem(ENDPOINT_KEY, endpoint.trim());
+                saveSystemSettings(settings);
+                const ep = endpoint.trim();
+                if (ep) {
+                    pushSettingsToSheet(settings).then((r) => {
+                        if (r && r.ok) setMsg("Pengaturan tersinkron ke Google Sheet");
+                        else setMsg("Pengaturan disimpan (offline)");
+                        setTimeout(() => setMsg(""), 2000);
+                    });
+                } else {
+                    setMsg("Pengaturan disimpan!");
+                    setTimeout(() => setMsg(""), 2000);
+                }
+            };
+
+            const handleTest = async () => {
+                if (!endpoint) {
+                    setStatus("URL masih kosong");
+                    return;
+                }
+                setStatus("Mencoba koneksi...");
+                try {
+                    localStorage.setItem(ENDPOINT_KEY, endpoint.trim());
+                    const res = await jsonpRequest(endpoint.trim(), { action: "export" });
+                    if (res && res.status === "success") {
+                        setStatus("✅ Koneksi Berhasil!");
+                    } else {
+                        setStatus("❌ Terhubung tapi respon salah");
+                    }
+                } catch (e) {
+                    setStatus("❌ Gagal: " + e.message);
+                }
+            };
+
+            return React.createElement("div", { className: "bg-white p-6 rounded-xl shadow-sm max-w-2xl" },
+                React.createElement("h2", { className: "text-xl font-bold mb-6" }, "Pengaturan Sistem"),
+                
+                // Backup Section
+                React.createElement("div", { className: "border rounded-xl p-4 bg-blue-50 mb-6" },
+                    React.createElement("div", { className: "font-bold text-blue-800 mb-2" }, "Backup & Restore Data"),
+                    React.createElement("div", { className: "flex gap-4" },
+                        React.createElement("button", { 
+                            onClick: backupData, 
+                            type: "button",
+                            className: "bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm flex items-center gap-2" 
+                        }, "💾 Backup (Download JSON)"),
+                        React.createElement("button", { 
+                            onClick: () => document.getElementById('restoreInput').click(), 
+                            type: "button",
+                            className: "bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700 text-sm flex items-center gap-2" 
+                        }, "📂 Restore (Upload JSON)"),
+                        React.createElement("input", { 
+                            id: "restoreInput", 
+                            type: "file", 
+                            accept: ".json", 
+                            className: "hidden", 
+                            onChange: restoreData 
+                        })
+                    )
+                ),
+
+                React.createElement("form", { onSubmit: handleSave, className: "space-y-6" },
+                    React.createElement("div", { className: "border rounded-xl p-4 bg-gray-50" },
+                        React.createElement("div", { className: "font-bold text-gray-800 mb-4" }, "Kop Surat & Logo"),
+                        React.createElement("div", { className: "mb-4 flex items-center gap-4 bg-white p-3 rounded border" },
+                            React.createElement("div", { className: "flex-1" },
+                                React.createElement("label", { className: "block text-xs font-bold text-gray-500 mb-1" }, "Upload Logo Perusahaan"),
+                                React.createElement("input", { type: "file", accept: "image/*", className: "w-full text-xs", onChange: (e) => handleImageUpload(e, 'logo', 'root') }),
+                                React.createElement("p", { className: "text-xs text-gray-400 mt-1" }, "*Format: PNG/JPG, Max 150KB. (Akan menggantikan Logo default)")
+                            ),
+                            settings.logo && React.createElement("div", { className: "w-16 h-16 border bg-white flex items-center justify-center relative group" },
+                                React.createElement("img", { src: settings.logo, className: "max-w-full max-h-full object-contain" }),
+                                React.createElement("button", { 
+                                    className: "absolute top-0 right-0 bg-red-500 text-white text-xs px-1 opacity-0 group-hover:opacity-100",
+                                    onClick: () => setSettings(p => ({ ...p, logo: "" }))
+                                }, "X")
+                            )
+                        ),
+                        React.createElement("div", { className: "grid grid-cols-3 gap-2 mb-4" },
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Opacity Logo"),
+                                React.createElement("input", { type: "number", min: "0.1", max: "1", step: "0.05", className: "w-full p-2 border rounded text-xs", value: (settings.logoOpacity ?? 1), onChange: e => setSettings(p => ({ ...p, logoOpacity: Number(e.target.value) })) })
+                            ),
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Brightness Logo"),
+                                React.createElement("input", { type: "number", min: "0.5", max: "1.5", step: "0.05", className: "w-full p-2 border rounded text-xs", value: (settings.logoBrightness ?? 1.05), onChange: e => setSettings(p => ({ ...p, logoBrightness: Number(e.target.value) })) })
+                            ),
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Contrast Logo"),
+                                React.createElement("input", { type: "number", min: "0.5", max: "1.5", step: "0.05", className: "w-full p-2 border rounded text-xs", value: (settings.logoContrast ?? 0.95), onChange: e => setSettings(p => ({ ...p, logoContrast: Number(e.target.value) })) })
+                            )
+                        ),
+                        React.createElement("div", { className: "flex items-center gap-2 mb-4" },
+                            React.createElement("button", { 
+                                type: "button",
+                                className: "px-2 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200",
+                                onClick: () => setSettings(p => ({ 
+                                    ...p, 
+                                    logoOpacity: 1,
+                                    logoBrightness: 1.05,
+                                    logoContrast: 0.95
+                                }))
+                            }, "Mode Cerah"),
+                            React.createElement("button", { 
+                                type: "button",
+                                className: "px-2 py-1 text-xs bg-white border rounded hover:bg-gray-50",
+                                onClick: () => setSettings(p => ({ 
+                                    ...p, 
+                                    logoOpacity: 1,
+                                    logoBrightness: 1,
+                                    logoContrast: 1
+                                }))
+                            }, "Reset")
+                        ),
+                        React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "1. Tipe Perusahaan", value: settings.kopSurat.line1, onChange: e => setSettings(p => ({ ...p, kopSurat: { ...p.kopSurat, line1: e.target.value } })) }),
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "2. Nama Perusahaan", value: settings.kopSurat.line2, onChange: e => setSettings(p => ({ ...p, kopSurat: { ...p.kopSurat, line2: e.target.value } })) }),
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "3. Nama Kota/Kabupaten", value: settings.kopSurat.line3, onChange: e => setSettings(p => ({ ...p, kopSurat: { ...p.kopSurat, line3: e.target.value } })) }),
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "4. Nama Kantor Unit/Cabang", value: settings.kopSurat.line4, onChange: e => setSettings(p => ({ ...p, kopSurat: { ...p.kopSurat, line4: e.target.value } })) })
+                        ),
+                        React.createElement("textarea", { className: "w-full p-2 border rounded mt-3", placeholder: "5. Alamat Perusahaan", rows: 2, value: settings.kopSurat.line5, onChange: e => setSettings(p => ({ ...p, kopSurat: { ...p.kopSurat, line5: e.target.value } })) }),
+                        React.createElement("input", { className: "w-full p-2 border rounded mt-3", placeholder: "6. No. Telp/HP dan Email Perusahaan", value: settings.kopSurat.line6, onChange: e => setSettings(p => ({ ...p, kopSurat: { ...p.kopSurat, line6: e.target.value } })) })
+                    ),
+                    React.createElement("div", { className: "border rounded-xl p-4 bg-gray-50" },
+                        React.createElement("div", { className: "font-bold text-gray-800 mb-4" }, "Kantor"),
+                        React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                            React.createElement("select", { className: "w-full p-2 border rounded", value: settings.kantor.tipe, onChange: e => setSettings(p => ({ ...p, kantor: { ...p.kantor, tipe: e.target.value } })) },
+                                React.createElement("option", { value: "Pusat" }, "Kantor Pusat"),
+                                React.createElement("option", { value: "Cabang" }, "Kantor Cabang")
+                            ),
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Nama Kantor", value: settings.kantor.nama, onChange: e => setSettings(p => ({ ...p, kantor: { ...p.kantor, nama: e.target.value } })) })
+                        ),
+                        React.createElement("textarea", { className: "w-full p-2 border rounded mt-3", placeholder: "Alamat Kantor", rows: 2, value: settings.kantor.address, onChange: e => setSettings(p => ({ ...p, kantor: { ...p.kantor, address: e.target.value } })) }),
+                        React.createElement("div", { className: "grid grid-cols-3 gap-4 mt-3" },
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Latitude", value: settings.kantor.lat, onChange: e => setSettings(p => ({ ...p, kantor: { ...p.kantor, lat: e.target.value } })) }),
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Longitude", value: settings.kantor.lng, onChange: e => setSettings(p => ({ ...p, kantor: { ...p.kantor, lng: e.target.value } })) }),
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Radius (meter)", value: settings.kantor.radiusM, onChange: e => setSettings(p => ({ ...p, kantor: { ...p.kantor, radiusM: e.target.value } })) })
+                        )
+                    ),
+                    React.createElement("div", { className: "border rounded-xl p-4 bg-gray-50" },
+                        React.createElement("div", { className: "font-bold text-gray-800 mb-4 flex items-center justify-between" },
+                            "Kehadiran & Denda",
+                            React.createElement("div", { className: "flex items-center gap-2" },
+                                React.createElement("input", { 
+                                    type: "checkbox", 
+                                    id: "toggleDenda",
+                                    className: "w-4 h-4",
+                                    checked: settings.denda?.aktif || false, 
+                                    onChange: e => setSettings(p => ({ ...p, denda: { ...(p.denda || {}), aktif: e.target.checked } })) 
+                                }),
+                                React.createElement("label", { htmlFor: "toggleDenda", className: "text-xs font-normal text-gray-600" }, "Aktifkan Denda")
+                            )
+                        ),
+                        React.createElement("div", { className: "grid grid-cols-3 gap-4 mb-4" },
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Jam Masuk"),
+                                React.createElement("input", { 
+                                    type: "time", 
+                                    className: "w-full p-2 border rounded", 
+                                    value: settings.kehadiran.jamMasuk, 
+                                    onChange: e => {
+                                        const v = e.target.value;
+                                        setSettings(p => {
+                                            const next = { ...p, kehadiran: { ...p.kehadiran, jamMasuk: v } };
+                                            saveSystemSettings(next);
+                                            const ep = (endpoint || "").trim();
+                                            if (ep) pushSettingsToSheet(next);
+                                            return next;
+                                        });
+                                    } 
+                                })
+                            ),
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Toleransi (menit)"),
+                                React.createElement("input", { type: "number", className: "w-full p-2 border rounded", placeholder: "Toleransi terlambat (menit)", value: settings.kehadiran.toleransiTerlambatMenit, onChange: e => setSettings(p => ({ ...p, kehadiran: { ...p.kehadiran, toleransiTerlambatMenit: Number(e.target.value || 0) } })) })
+                            ),
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Jam Pulang"),
+                                React.createElement("input", { 
+                                    type: "time", 
+                                    className: "w-full p-2 border rounded", 
+                                    value: settings.kehadiran.jamPulang, 
+                                    onChange: e => {
+                                        const v = e.target.value;
+                                        setSettings(p => {
+                                            const next = { ...p, kehadiran: { ...p.kehadiran, jamPulang: v } };
+                                            saveSystemSettings(next);
+                                            const ep = (endpoint || "").trim();
+                                            if (ep) pushSettingsToSheet(next);
+                                            return next;
+                                        });
+                                    } 
+                                })
+                            )
+                        ),
+                        (settings.denda?.aktif) && React.createElement("div", { className: "grid grid-cols-3 gap-4 border-t pt-4" },
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Denda Terlambat (Rp)"),
+                                React.createElement("input", { type: "number", className: "w-full p-2 border rounded", value: settings.denda?.terlambat || 0, onChange: e => setSettings(p => ({ ...p, denda: { ...(p.denda || {}), terlambat: Number(e.target.value) } })) })
+                            ),
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Denda Pulang Cepat (Rp)"),
+                                React.createElement("input", { type: "number", className: "w-full p-2 border rounded", value: settings.denda?.pulangCepat || 0, onChange: e => setSettings(p => ({ ...p, denda: { ...(p.denda || {}), pulangCepat: Number(e.target.value) } })) })
+                            ),
+                            React.createElement("div", null,
+                                React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Denda Alpa (Rp)"),
+                                React.createElement("input", { type: "number", className: "w-full p-2 border rounded", value: settings.denda?.alpa || 0, onChange: e => setSettings(p => ({ ...p, denda: { ...(p.denda || {}), alpa: Number(e.target.value) } })) })
+                            )
+                        ),
+                        React.createElement("textarea", { className: "w-full p-2 border rounded mt-3 text-sm", placeholder: "Status tersedia (satu per baris)", rows: 4, value: (settings.kehadiran.statusTersedia || []).join("\n"), onChange: e => setSettings(p => ({ ...p, kehadiran: { ...p.kehadiran, statusTersedia: normalizeLines(e.target.value) } })) })
+                    ),
+                    React.createElement("div", { className: "border rounded-xl p-4 bg-gray-50 mt-4" },
+                        React.createElement("div", { className: "font-bold text-gray-800 mb-2" }, "Pengaturan Shift Kerja"),
+                        React.createElement("p", { className: "text-xs text-gray-500 mb-3" }, "Atur jam masuk dan pulang per shift. Jika tidak ada shift yang cocok, sistem akan memakai jam global di atas."),
+                        React.createElement("div", { className: "space-y-2" },
+                            (Array.isArray(settings.shifts) ? settings.shifts : []).map((sh, idx) =>
+                                React.createElement("div", { key: idx, className: "grid grid-cols-5 gap-2 items-center" },
+                                    React.createElement("input", {
+                                        className: "w-full p-2 border rounded text-xs col-span-2",
+                                        placeholder: "Nama Shift (mis. Pagi)",
+                                        value: sh.name || "",
+                                        onChange: e => {
+                                            const v = e.target.value;
+                                            setSettings(p => {
+                                                const list = Array.isArray(p.shifts) ? [...p.shifts] : [];
+                                                list[idx] = { ...(list[idx] || {}), name: v };
+                                                return { ...p, shifts: list };
+                                            });
+                                        }
+                                    }),
+                                    React.createElement("input", {
+                                        type: "time",
+                                        className: "w-full p-2 border rounded text-xs",
+                                        value: sh.jamMasuk || "",
+                                        onChange: e => {
+                                            const v = e.target.value;
+                                            setSettings(p => {
+                                                const list = Array.isArray(p.shifts) ? [...p.shifts] : [];
+                                                list[idx] = { ...(list[idx] || {}), jamMasuk: v };
+                                                return { ...p, shifts: list };
+                                            });
+                                        }
+                                    }),
+                                    React.createElement("input", {
+                                        type: "time",
+                                        className: "w-full p-2 border rounded text-xs",
+                                        value: sh.jamPulang || "",
+                                        onChange: e => {
+                                            const v = e.target.value;
+                                            setSettings(p => {
+                                                const list = Array.isArray(p.shifts) ? [...p.shifts] : [];
+                                                list[idx] = { ...(list[idx] || {}), jamPulang: v };
+                                                return { ...p, shifts: list };
+                                            });
+                                        }
+                                    }),
+                                    React.createElement("input", {
+                                        type: "number",
+                                        className: "w-full p-2 border rounded text-xs",
+                                        placeholder: "Toleransi (m)",
+                                        value: (sh.toleransiTerlambatMenit ?? settings.kehadiran.toleransiTerlambatMenit ?? 0),
+                                        onChange: e => {
+                                            const v = Number(e.target.value || 0);
+                                            setSettings(p => {
+                                                const list = Array.isArray(p.shifts) ? [...p.shifts] : [];
+                                                list[idx] = { ...(list[idx] || {}), toleransiTerlambatMenit: v };
+                                                return { ...p, shifts: list };
+                                            });
+                                        }
+                                    })
+                                )
+                            ),
+                            React.createElement("button", {
+                                type: "button",
+                                className: "px-3 py-1 text-xs bg-blue-600 text-white rounded",
+                                onClick: () => setSettings(p => {
+                                    const list = Array.isArray(p.shifts) ? [...p.shifts] : [];
+                                    list.push({ name: "", jamMasuk: "", jamPulang: "", toleransiTerlambatMenit: p.kehadiran?.toleransiTerlambatMenit ?? 0 });
+                                    return { ...p, shifts: list };
+                                })
+                            }, "+ Tambah Shift")
+                        )
+                    ),
+                    React.createElement("div", { className: "border rounded-xl p-4 bg-gray-50" },
+                        React.createElement("div", { className: "font-bold text-gray-800 mb-4" }, "Penandatangan Laporan"),
+                        React.createElement("div", { className: "mb-4" },
+                            React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Kota Penandatangan"),
+                            React.createElement("input", { className: "w-full p-2 border rounded", placeholder: "Contoh: Ternate", value: settings.penandatangan?.kota || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), kota: e.target.value } })) })
+                        ),
+                        React.createElement("div", { className: "grid grid-cols-1 gap-6" },
+                            // Pejabat 1
+                            React.createElement("div", { className: "border-l-4 border-blue-500 pl-4" },
+                                React.createElement("h4", { className: "text-sm font-bold text-gray-700 mb-2" }, "Pejabat 1 (Utama/Pengesah)"),
+                                React.createElement("select", {
+                                    className: "w-full p-2 border rounded text-sm mb-2 bg-blue-50",
+                                    value: "",
+                                    onChange: (e) => {
+                                        const emp = employees.find(emp => emp.id === e.target.value);
+                                        if (emp) {
+                                            setSettings(p => ({
+                                                ...p,
+                                                penandatangan: {
+                                                    ...(p.penandatangan || {}),
+                                                    nama1: emp.name,
+                                                    nip1: formatNpp(emp.npp || emp.nip),
+                                                    jabatan1: emp.role
+                                                }
+                                            }));
+                                        }
+                                    }
+                                },
+                                    React.createElement("option", { value: "" }, "--- Pilih Pejabat 1 dari Karyawan ---"),
+                                    employees.map(emp => React.createElement("option", { key: emp.id, value: emp.id }, `${emp.name} - ${emp.role}`))
+                                ),
+                                React.createElement("div", { className: "grid grid-cols-3 gap-2 mb-2" },
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "Jabatan", value: settings.penandatangan?.jabatan1 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), jabatan1: e.target.value } })) }),
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "Nama", value: settings.penandatangan?.nama1 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), nama1: e.target.value } })) }),
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "NIP/NPP", value: settings.penandatangan?.nip1 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), nip1: e.target.value } })) })
+                                ),
+                                React.createElement("div", { className: "flex items-center space-x-2" },
+                                    React.createElement("div", { className: "flex-1" },
+                                        React.createElement("label", { className: "block text-xs font-bold text-gray-500 mb-1" }, "Upload Tanda Tangan 1"),
+                                        React.createElement("input", { type: "file", accept: "image/*", className: "w-full text-xs", onChange: (e) => handleImageUpload(e, 'ttd1') }),
+                                        settings.penandatangan?.ttd1 && React.createElement("div", { className: "flex items-center gap-2 mt-1" },
+                                            React.createElement("img", { src: settings.penandatangan.ttd1, className: "h-10 border" }),
+                                            React.createElement("button", { 
+                                                type: "button",
+                                                className: "px-2 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200",
+                                                onClick: async () => {
+                                                    const out = await convertImageBase64ToWhite(settings.penandatangan.ttd1, 0.8);
+                                                    setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), ttd1: out } }));
+                                                }
+                                            }, "Konversi Latar Putih")
+                                        )
+                                    ),
+                                    React.createElement("div", { className: "flex-1" },
+                                        React.createElement("label", { className: "block text-xs font-bold text-gray-500 mb-1" }, "Upload Stempel (Utama)"),
+                                        React.createElement("input", { type: "file", accept: "image/*", className: "w-full text-xs", onChange: (e) => handleImageUpload(e, 'stempel') }),
+                                        settings.penandatangan?.stempel && React.createElement("div", { className: "flex items-center gap-2 mt-1" },
+                                            React.createElement("img", { src: settings.penandatangan.stempel, className: "h-10 border" }),
+                                            React.createElement("button", { 
+                                                type: "button",
+                                                className: "px-2 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200",
+                                                onClick: async () => {
+                                                    const out = await convertImageBase64ToWhite(settings.penandatangan.stempel, 0.8);
+                                                    setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), stempel: out } }));
+                                                }
+                                            }, "Konversi Latar Putih")
+                                        ),
+                                        React.createElement("div", { className: "grid grid-cols-2 gap-2 mt-2" },
+                                            React.createElement("select", { 
+                                                className: "p-2 border rounded text-xs bg-white",
+                                                value: settings.penandatangan?.stempelPreset || "",
+                                                onChange: e => {
+                                                    const preset = e.target.value;
+                                                    const presets = {
+                                                        "kanan-atas": { x: -140, y: -80 },
+                                                        "kiri-atas": { x: -220, y: -80 },
+                                                        "tengah": { x: -140, y: -50 },
+                                                        "kanan-bawah": { x: -140, y: -20 },
+                                                        "kiri-bawah": { x: -220, y: -20 }
+                                                    };
+                                                    const sel = presets[preset] || { x: -140, y: -50 };
+                                                    setSettings(p => ({ 
+                                                        ...p, 
+                                                        penandatangan: { 
+                                                            ...(p.penandatangan || {}), 
+                                                            stempelPreset: preset,
+                                                            stempelOffsetX: sel.x,
+                                                            stempelOffsetY: sel.y
+                                                        } 
+                                                    }));
+                                                }
+                                            }, 
+                                                React.createElement("option", { value: "" }, "Preset Posisi Stempel"),
+                                                React.createElement("option", { value: "kanan-atas" }, "Kanan Atas"),
+                                                React.createElement("option", { value: "kiri-atas" }, "Kiri Atas"),
+                                                React.createElement("option", { value: "tengah" }, "Tengah"),
+                                                React.createElement("option", { value: "kanan-bawah" }, "Kanan Bawah"),
+                                                React.createElement("option", { value: "kiri-bawah" }, "Kiri Bawah")
+                                            ),
+                                            React.createElement("select", {
+                                                className: "p-2 border rounded text-xs bg-white",
+                                                value: String(settings.penandatangan?.jumlah || 1),
+                                                onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), jumlah: Number(e.target.value || 1) } }))
+                                            },
+                                                React.createElement("option", { value: "1" }, "1 Penandatangan"),
+                                                React.createElement("option", { value: "2" }, "2 Penandatangan"),
+                                                React.createElement("option", { value: "3" }, "3 Penandatangan")
+                                            )
+                                        ),
+                                        React.createElement("div", { className: "grid grid-cols-3 gap-2 mt-2" },
+                                            React.createElement("input", { type: "number", min: "0.1", max: "1", step: "0.05", className: "p-2 border rounded text-xs", placeholder: "Opacity 0.1-1", value: (settings.penandatangan?.stempelOpacity ?? 0.8), onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), stempelOpacity: Number(e.target.value) } })) }),
+                                            React.createElement("input", { type: "number", step: "1", className: "p-2 border rounded text-xs", placeholder: "Offset X (%)", value: (settings.penandatangan?.stempelOffsetX ?? -140), onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), stempelOffsetX: Number(e.target.value) } })) }),
+                                            React.createElement("input", { type: "number", step: "1", className: "p-2 border rounded text-xs", placeholder: "Offset Y (%)", value: (settings.penandatangan?.stempelOffsetY ?? -50), onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), stempelOffsetY: Number(e.target.value) } })) })
+                                        )
+                                    )
+                                )
+                            ),
+                            React.createElement("div", { className: "grid grid-cols-3 gap-2 mt-3" },
+                                React.createElement("div", null,
+                                    React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Opacity TTD"),
+                                    React.createElement("input", { type: "number", min: "0.1", max: "1", step: "0.05", className: "w-full p-2 border rounded text-xs", value: (settings.penandatangan?.ttdOpacity ?? 0.85), onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), ttdOpacity: Number(e.target.value) } })) })
+                                ),
+                                React.createElement("div", null,
+                                    React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Brightness TTD"),
+                                    React.createElement("input", { type: "number", min: "0.5", max: "1.5", step: "0.05", className: "w-full p-2 border rounded text-xs", value: (settings.penandatangan?.ttdBrightness ?? 1.1), onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), ttdBrightness: Number(e.target.value) } })) })
+                                ),
+                                React.createElement("div", null,
+                                    React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Contrast TTD"),
+                                    React.createElement("input", { type: "number", min: "0.5", max: "1.5", step: "0.05", className: "w-full p-2 border rounded text-xs", value: (settings.penandatangan?.ttdContrast ?? 0.9), onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), ttdContrast: Number(e.target.value) } })) })
+                                )
+                            ),
+                            React.createElement("div", { className: "flex items-center gap-2 mt-2" },
+                                React.createElement("button", { 
+                                    type: "button",
+                                    className: "px-2 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200",
+                                    onClick: () => setSettings(p => ({ 
+                                        ...p, 
+                                        penandatangan: { 
+                                            ...(p.penandatangan || {}), 
+                                            ttdOpacity: 0.85,
+                                            ttdBrightness: 1.1,
+                                            ttdContrast: 0.9
+                                        } 
+                                    }))
+                                }, "Mode Cerah"),
+                                React.createElement("button", { 
+                                    type: "button",
+                                    className: "px-2 py-1 text-xs bg-white border rounded hover:bg-gray-50",
+                                    onClick: () => setSettings(p => ({ 
+                                        ...p, 
+                                        penandatangan: { 
+                                            ...(p.penandatangan || {}), 
+                                            ttdOpacity: 1,
+                                            ttdBrightness: 1,
+                                            ttdContrast: 1
+                                        } 
+                                    }))
+                                }, "Reset")
+                            ),
+                            React.createElement("div", { className: "grid grid-cols-2 gap-2 mt-3" },
+                                React.createElement("div", null,
+                                    React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Brightness Stempel"),
+                                    React.createElement("input", { type: "number", min: "0.5", max: "1.5", step: "0.05", className: "w-full p-2 border rounded text-xs", value: (settings.penandatangan?.stempelBrightness ?? 1.05), onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), stempelBrightness: Number(e.target.value) } })) })
+                                ),
+                                React.createElement("div", null,
+                                    React.createElement("label", { className: "block text-xs font-semibold text-gray-600 mb-1" }, "Contrast Stempel"),
+                                    React.createElement("input", { type: "number", min: "0.5", max: "1.5", step: "0.05", className: "w-full p-2 border rounded text-xs", value: (settings.penandatangan?.stempelContrast ?? 0.95), onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), stempelContrast: Number(e.target.value) } })) })
+                                )
+                            ),
+                            React.createElement("div", { className: "flex items-center gap-2 mt-2" },
+                                React.createElement("button", { 
+                                    type: "button",
+                                    className: "px-2 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200",
+                                    onClick: () => setSettings(p => ({ 
+                                        ...p, 
+                                        penandatangan: { 
+                                            ...(p.penandatangan || {}), 
+                                            stempelOpacity: 0.8,
+                                            stempelBrightness: 1.05,
+                                            stempelContrast: 0.95
+                                        } 
+                                    }))
+                                }, "Mode Cerah"),
+                                React.createElement("button", { 
+                                    type: "button",
+                                    className: "px-2 py-1 text-xs bg-white border rounded hover:bg-gray-50",
+                                    onClick: () => setSettings(p => ({ 
+                                        ...p, 
+                                        penandatangan: { 
+                                            ...(p.penandatangan || {}), 
+                                            stempelOpacity: 1,
+                                            stempelBrightness: 1,
+                                            stempelContrast: 1
+                                        } 
+                                    }))
+                                }, "Reset")
+                            ),
+                            // Pejabat 2
+                            React.createElement("div", { className: "border-l-4 border-green-500 pl-4" },
+                                React.createElement("h4", { className: "text-sm font-bold text-gray-700 mb-2" }, "Pejabat 2 (Penyetuju - jika 3 orang)"),
+                                React.createElement("select", {
+                                    className: "w-full p-2 border rounded text-sm mb-2 bg-green-50",
+                                    value: "",
+                                    onChange: (e) => {
+                                        const emp = employees.find(emp => emp.id === e.target.value);
+                                        if (emp) {
+                                            setSettings(p => ({
+                                                ...p,
+                                                penandatangan: {
+                                                    ...(p.penandatangan || {}),
+                                                    nama2: emp.name,
+                                                    nip2: formatNpp(emp.npp || emp.nip),
+                                                    jabatan2: emp.role
+                                                }
+                                            }));
+                                        }
+                                    }
+                                },
+                                    React.createElement("option", { value: "" }, "--- Pilih Pejabat 2 dari Karyawan ---"),
+                                    employees.map(emp => React.createElement("option", { key: emp.id, value: emp.id }, `${emp.name} - ${emp.role}`))
+                                ),
+                                React.createElement("div", { className: "grid grid-cols-3 gap-2 mb-2" },
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "Jabatan", value: settings.penandatangan?.jabatan2 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), jabatan2: e.target.value } })) }),
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "Nama", value: settings.penandatangan?.nama2 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), nama2: e.target.value } })) }),
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "NIP/NPP", value: settings.penandatangan?.nip2 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), nip2: e.target.value } })) })
+                                ),
+                                React.createElement("div", null,
+                                    React.createElement("label", { className: "block text-xs font-bold text-gray-500 mb-1" }, "Upload Tanda Tangan 2"),
+                                    React.createElement("input", { type: "file", accept: "image/*", className: "w-full text-xs", onChange: (e) => handleImageUpload(e, 'ttd2') }),
+                                    settings.penandatangan?.ttd2 && React.createElement("div", { className: "flex items-center gap-2 mt-1" },
+                                        React.createElement("img", { src: settings.penandatangan.ttd2, className: "h-10 border" }),
+                                        React.createElement("button", { 
+                                            type: "button",
+                                            className: "px-2 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200",
+                                            onClick: async () => {
+                                                const out = await convertImageBase64ToWhite(settings.penandatangan.ttd2, 0.8);
+                                                setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), ttd2: out } }));
+                                            }
+                                        }, "Konversi Latar Putih")
+                                    )
+                                )
+                            ),
+                            // Pejabat 3
+                            React.createElement("div", { className: "border-l-4 border-yellow-500 pl-4" },
+                                React.createElement("h4", { className: "text-sm font-bold text-gray-700 mb-2" }, "Pejabat 3 (Pembuat - jika 3 orang)"),
+                                React.createElement("select", {
+                                    className: "w-full p-2 border rounded text-sm mb-2 bg-yellow-50",
+                                    value: "",
+                                    onChange: (e) => {
+                                        const emp = employees.find(emp => emp.id === e.target.value);
+                                        if (emp) {
+                                            setSettings(p => ({
+                                                ...p,
+                                                penandatangan: {
+                                                    ...(p.penandatangan || {}),
+                                                    nama3: emp.name,
+                                                    nip3: formatNpp(emp.npp || emp.nip),
+                                                    jabatan3: emp.role
+                                                }
+                                            }));
+                                        }
+                                    }
+                                },
+                                    React.createElement("option", { value: "" }, "--- Pilih Pejabat 3 dari Karyawan ---"),
+                                    employees.map(emp => React.createElement("option", { key: emp.id, value: emp.id }, `${emp.name} - ${emp.role}`))
+                                ),
+                                React.createElement("div", { className: "grid grid-cols-3 gap-2 mb-2" },
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "Jabatan", value: settings.penandatangan?.jabatan3 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), jabatan3: e.target.value } })) }),
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "Nama", value: settings.penandatangan?.nama3 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), nama3: e.target.value } })) }),
+                                    React.createElement("input", { className: "p-2 border rounded text-sm", placeholder: "NIP/NPP", value: settings.penandatangan?.nip3 || "", onChange: e => setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), nip3: e.target.value } })) })
+                                ),
+                                React.createElement("div", null,
+                                    React.createElement("label", { className: "block text-xs font-bold text-gray-500 mb-1" }, "Upload Tanda Tangan 3"),
+                                    React.createElement("input", { type: "file", accept: "image/*", className: "w-full text-xs", onChange: (e) => handleImageUpload(e, 'ttd3') }),
+                                    settings.penandatangan?.ttd3 && React.createElement("div", { className: "flex items-center gap-2 mt-1" },
+                                        React.createElement("img", { src: settings.penandatangan.ttd3, className: "h-10 border" }),
+                                        React.createElement("button", { 
+                                            type: "button",
+                                            className: "px-2 py-1 text-xs bg-gray-100 border rounded hover:bg-gray-200",
+                                            onClick: async () => {
+                                                const out = await convertImageBase64ToWhite(settings.penandatangan.ttd3, 0.8);
+                                                setSettings(p => ({ ...p, penandatangan: { ...(p.penandatangan || {}), ttd3: out } }));
+                                            }
+                                        }, "Konversi Latar Putih")
+                                    )
+                                )
+                            )
+                        )
+                    ),
+                    React.createElement("div", { className: "border rounded-xl p-4 bg-gray-50" },
+                        React.createElement("div", { className: "font-bold text-gray-800 mb-4" }, "Organisasi"),
+                        React.createElement("div", { className: "grid grid-cols-2 gap-4" },
+                            React.createElement("textarea", { className: "w-full p-2 border rounded text-sm", placeholder: "Unit kerja tersedia (satu per baris)", rows: 5, value: (settings.organisasi.unitKerjaTersedia || []).join("\n"), onChange: e => setSettings(p => ({ ...p, organisasi: { ...p.organisasi, unitKerjaTersedia: normalizeLines(e.target.value) } })) }),
+                            React.createElement("textarea", { className: "w-full p-2 border rounded text-sm", placeholder: "Jabatan tersedia (satu per baris)", rows: 5, value: (settings.organisasi.jabatanTersedia || []).join("\n"), onChange: e => setSettings(p => ({ ...p, organisasi: { ...p.organisasi, jabatanTersedia: normalizeLines(e.target.value) } })) })
+                        ),
+                        React.createElement("textarea", { className: "w-full p-2 border rounded text-sm mt-3", placeholder: "Hirarki tersedia (satu per baris)", rows: 4, value: (settings.organisasi.hirarkiTersedia || []).join("\n"), onChange: e => setSettings(p => ({ ...p, organisasi: { ...p.organisasi, hirarkiTersedia: normalizeLines(e.target.value) } })) })
+                    ),
+                    React.createElement("div", null,
+                        React.createElement("label", { className: "block text-sm font-medium text-gray-700 mb-2" }, "Google Apps Script Web App URL"),
+                        React.createElement("input", { 
+                            className: "w-full p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all", 
+                            placeholder: "https://script.google.com/macros/s/...", 
+                            value: endpoint, 
+                            onChange: e => setEndpoint(e.target.value)
+                        }),
+                        React.createElement("p", { className: "text-xs text-gray-500 mt-2" }, 
+                            "URL Endpoint diperlukan untuk sinkronisasi data. Kosongkan jika ingin mode full offline lokal."
+                        )
+                    ),
+                    React.createElement("div", { className: "flex items-center justify-between pt-4" },
+                        React.createElement("div", { className: "flex items-center gap-4" },
+                             React.createElement("button", { type: "button", onClick: handleTest, className: "text-blue-600 text-sm hover:underline font-medium" }, "Tes Koneksi"),
+                             status && React.createElement("span", { className: `text-sm font-medium ${status.includes('✅') ? 'text-green-600' : 'text-red-600'}` }, status)
+                        ),
+                        React.createElement("div", { className: "flex items-center gap-3" },
+                            msg && React.createElement("span", { className: "text-emerald-600 text-sm font-medium bg-emerald-50 px-3 py-1 rounded-full" }, msg),
+                            React.createElement("button", { type: "submit", className: "px-6 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm" }, "Simpan")
+                        )
+                    )
+                )
+            );
+        }
+
+        // 6. Main App Layout
+        function App() {
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [activeTab, setActiveTab] = useState("dashboard");
+
+            if (!isLoggedIn) {
+                return React.createElement(Login, { onLogin: () => setIsLoggedIn(true) });
+            }
+
+            const NavItem = ({ id, label, icon }) => (
+                React.createElement("button", { 
+                    onClick: () => setActiveTab(id),
+                    className: `w-full text-left p-3 rounded-xl flex items-center gap-3 transition-all duration-200 ${
+                        activeTab === id 
+                        ? "bg-blue-600 shadow-lg shadow-blue-900/50 text-white font-medium scale-[1.02]" 
+                        : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                    }`
+                }, 
+                    icon,
+                    label
+                )
+            );
+
+            return React.createElement("div", { className: "min-h-screen flex bg-gray-100 font-sans" },
+                // Sidebar
+                React.createElement("div", { className: "w-72 bg-gray-900 text-white p-6 flex flex-col shadow-2xl z-10" },
+                    // Brand
+                    React.createElement("div", { className: "mb-10 flex items-center gap-3 px-2" },
+                        React.createElement("div", { className: "w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30" },
+                            React.createElement(lucide.LayoutGrid, { size: 24, className: "text-white" })
+                        ),
+                        React.createElement("div", null,
+                            React.createElement("h1", { className: "text-xl font-bold tracking-tight" }, "Sistem Absensi Karyawan"),
+                            React.createElement("p", { className: "text-xs text-gray-500 font-medium" }, "Admin Panel v2.0")
+                        )
+                    ),
+
+                    // Navigation
+                    React.createElement("nav", { className: "space-y-2 flex-1" },
+                        React.createElement("p", { className: "text-xs font-bold text-gray-500 uppercase tracking-wider mb-4 px-3" }, "Menu Utama"),
+                        React.createElement(NavItem, { 
+                            id: "dashboard", 
+                            label: "Dashboard", 
+                            icon: React.createElement(lucide.LayoutDashboard, { size: 20 }) 
+                        }),
+                        React.createElement(NavItem, { 
+                            id: "karyawan", 
+                            label: "Data Karyawan", 
+                            icon: React.createElement(lucide.Users, { size: 20 }) 
+                        }),
+                        React.createElement(NavItem, { 
+                            id: "absensi", 
+                            label: "Data Absensi", 
+                            icon: React.createElement(lucide.CalendarCheck, { size: 20 }) 
+                        }),
+                        React.createElement("div", { className: "pt-4 pb-2" },
+                            React.createElement("div", { className: "border-t border-gray-800" })
+                        ),
+                        React.createElement(NavItem, { 
+                            id: "settings", 
+                            label: "Pengaturan", 
+                            icon: React.createElement(lucide.Settings, { size: 20 }) 
+                        })
+                    ),
+
+                    // User Profile / Logout
+                    React.createElement("div", { className: "mt-auto pt-6 border-t border-gray-800" },
+                        React.createElement("button", { 
+                            onClick: () => setIsLoggedIn(false),
+                            className: "w-full flex items-center gap-3 p-3 rounded-xl hover:bg-red-500/10 hover:text-red-400 text-gray-400 transition-colors group"
+                        }, 
+                            React.createElement(lucide.LogOut, { size: 20, className: "group-hover:text-red-400" }),
+                            "Keluar Aplikasi"
+                        )
+                    )
+                ),
+                // Main Content
+                React.createElement("div", { className: "flex-1 flex flex-col h-screen overflow-hidden" },
+                    // Top Bar (Optional, keeps layout clean)
+                    React.createElement("header", { className: "bg-white border-b h-16 flex items-center justify-between px-8 shadow-sm z-0" },
+                        React.createElement("h2", { className: "text-lg font-semibold text-gray-700 capitalize" }, 
+                            activeTab === 'dashboard' ? 'Ringkasan Sistem' : activeTab.replace('-', ' ')
+                        ),
+                        React.createElement("div", { className: "flex items-center gap-4" },
+                            React.createElement("div", { className: "text-sm text-right hidden md:block" },
+                                React.createElement("p", { className: "font-medium text-gray-800" }, "Administrator"),
+                                React.createElement("p", { className: "text-xs text-gray-500" }, "Super User")
+                            ),
+                            React.createElement("div", { className: "w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center border-2 border-white shadow-sm" },
+                                React.createElement(lucide.User, { size: 20, className: "text-gray-500" })
+                            )
+                        )
+                    ),
+                    
+                    // Content Area
+                    React.createElement("main", { className: "flex-1 overflow-y-auto p-8 bg-gray-50/50" },
+                        React.createElement("div", { className: "max-w-7xl mx-auto" },
+                            activeTab === "dashboard" ? React.createElement(Dashboard) :
+                            activeTab === "karyawan" ? React.createElement(EmployeeManager) : 
+                            activeTab === "absensi" ? React.createElement(AttendanceManager) :
+                            React.createElement(SettingsManager)
+                        )
+                    )
+                )
+            );
+        }
+
+        try {
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(React.createElement(App));
+        } catch (e) {
+            document.getElementById('root').innerHTML = '<div style="color:red; padding:20px;"><h3>Application Error</h3><pre>' + e.message + '</pre></div>';
+        }
+    </script>
+</body>
+</html>

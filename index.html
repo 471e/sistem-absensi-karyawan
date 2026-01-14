@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Absensi Karyawan</title>
+    <script src="vendor/tailwindcss.js"></script>
+    <script crossorigin src="vendor/react.production.min.js"></script>
+    <script crossorigin src="vendor/react-dom.production.min.js"></script>
+    <script src="vendor/lz-string.min.js"></script>
+    <style>
+        body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif; background-color: #f3f4f6; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script>
+        // --- Error Handling ---
+        window.onerror = function(msg, url, line, col, error) {
+            if (window.hasAlertedError) return;
+            if (String(msg).toLowerCase().includes("script error") && line === 0) {
+                console.warn("Ignored cross-origin script error:", msg);
+                return;
+            }
+            window.hasAlertedError = true;
+            const errorMsg = "System Error: " + msg + "\nLine: " + line;
+            const div = document.createElement("div");
+            div.style.cssText = "position:fixed; top:0; left:0; width:100%; background:red; color:white; padding:10px; z-index:9999;";
+            div.textContent = errorMsg;
+            document.body.appendChild(div);
+        };
+
+        // --- Polyfills & Libs ---
+        const ot = React;
+        const m = {
+            jsx: (type, props, key) => {
+                const { children, ...otherProps } = props || {};
+                if (key !== undefined) otherProps.key = key;
+                return React.createElement(type, otherProps, children);
+            },
+            jsxs: (type, props, key) => {
+                const { children, ...otherProps } = props || {};
+                if (key !== undefined) otherProps.key = key;
+                return React.createElement(type, otherProps, children);
+            },
+            Fragment: React.Fragment
+        };
+
+        const Tt = (name, elements) => {
+            return React.forwardRef((props, ref) => {
+                return React.createElement(
+                    "svg",
+                    {
+                        xmlns: "http://www.w3.org/2000/svg",
+                        width: 24,
+                        height: 24,
+                        viewBox: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        strokeWidth: 2,
+                        strokeLinecap: "round",
+                        strokeLinejoin: "round",
+                        ...props,
+                        ref: ref
+                    },
+                    elements.map(([tag, attrs], index) => 
+                        React.createElement(tag, { ...attrs, key: index })
+                    )
+                );
+            });
+        };
+
+        window.APP_CONFIG = {
+            appName: "Sistem Absensi Karyawan",
+            backup: true,
+            reports: true,
+            toast: true
+        };
+
+        // Cross-tab Synchronization
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'employees_data' || e.key === 'attendance_records') {
+                console.log('Data updated in another tab. Reloading...');
+                window.location.reload();
+            }
+        });
+
+        // --- Icons (Subset) ---
+        const Z0=Tt("User",[["path",{d:"M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2",key:"1z4e8s"}],["circle",{cx:"12",cy:"7",r:"4",key:"1gu3jr"}]]);
+        const R7=Tt("Lock",[["rect",{width:"18",height:"11",x:"3",y:"11",rx:"2",ry:"2",key:"1w4ew1"}],["path",{d:"M7 11V7a5 5 0 0 1 10 0v4",key:"fwhiMz"}]]);
+        const M7=Tt("LogIn",[["path",{d:"M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4",key:"1wij1y"}],["polyline",{points:"10 17 15 12 10 7",key:"1p2l0a"}],["line",{x1:"15",x2:"3",y1:"12",y2:"12",key:"1v2t1q"}]]);
+        const D7=Tt("Loader2",[["path",{d:"M21 12a9 9 0 1 1-6.219-8.56",key:"13zald"}]]);
+
+        // --- Database ---
+        const DEFAULT_EMPLOYEES = [
+            { "id": "AM2-001", "name": "Sahirudin, S.Kel", "workUnit": "Kantor Cabang", "role": "Kepala Unit", "password": "123", "gender": "L", "phone": "081234567890", "email": "sahirudin@example.com", "address": "Jl. Contoh No. 1", "joinDate": "2020-01-01", "nik": "3201010101010001", "npp": "NPP-001", "golongan": "III/c", "pangkat": "Penata", "masaKerja": "10 Tahun", "birthPlace": "Jakarta", "birthDate": "1980-01-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-002", "name": "Bustaman Hayatuddin", "workUnit": "Kantor Cabang", "role": "Kepala Operator Teknik", "password": "123", "gender": "L", "phone": "081234567891", "email": "bustaman@example.com", "address": "Jl. Contoh No. 2", "joinDate": "2020-02-01", "nik": "3201010101010002", "npp": "NPP-002", "golongan": "III/b", "pangkat": "Penata Muda Tk. I", "masaKerja": "8 Tahun", "birthPlace": "Bandung", "birthDate": "1981-02-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-003", "name": "Aji Bayu Leksono", "workUnit": "Kantor Cabang", "role": "Kepala Operator Adm. & Keuangan", "password": "123", "gender": "L", "phone": "081234567892", "email": "aji@example.com", "address": "Jl. Contoh No. 3", "joinDate": "2020-03-01", "nik": "3201010101010003", "npp": "NPP-003", "golongan": "III/a", "pangkat": "Penata Muda", "masaKerja": "5 Tahun", "birthPlace": "Surabaya", "birthDate": "1982-03-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-004", "name": "Abdul Latif Karim", "workUnit": "Kantor Cabang", "role": "Pelaksana Intek & IPA", "password": "123", "gender": "L", "phone": "081234567893", "email": "latif@example.com", "address": "Jl. Contoh No. 4", "joinDate": "2020-04-01", "nik": "3201010101010004", "npp": "NPP-004", "golongan": "II/d", "pangkat": "Pengatur Tk. I", "masaKerja": "4 Tahun", "birthPlace": "Medan", "birthDate": "1983-04-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-005", "name": "Abdul Salam Rasai", "workUnit": "Kantor Cabang", "role": "Pelaksana Distribusi & Penyambungan", "password": "123", "gender": "L", "phone": "081234567894", "email": "salam@example.com", "address": "Jl. Contoh No. 5", "joinDate": "2020-05-01", "nik": "3201010101010005", "npp": "NPP-005", "golongan": "II/c", "pangkat": "Pengatur", "masaKerja": "3 Tahun", "birthPlace": "Makassar", "birthDate": "1984-05-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-006", "name": "Muhammad Afandi Ahmad", "workUnit": "Kantor Cabang", "role": "Pelaksana Rekening & Penagihan", "password": "123", "gender": "L", "phone": "081234567895", "email": "afandi@example.com", "address": "Jl. Contoh No. 6", "joinDate": "2020-06-01", "nik": "3201010101010006", "npp": "NPP-006", "golongan": "II/b", "pangkat": "Pengatur Muda Tk. I", "masaKerja": "2 Tahun", "birthPlace": "Semarang", "birthDate": "1985-06-01", "religion": "Islam", "maritalStatus": "Menikah", "status": "Tetap" },
+            { "id": "AM2-007", "name": "Zulkifli Dukomalamo", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "L", "phone": "081234567896", "email": "zulkifli@example.com", "address": "Jl. Contoh No. 7", "joinDate": "2020-07-01", "nik": "3201010101010007", "npp": "NPP-007", "golongan": "II/a", "pangkat": "Pengatur Muda", "masaKerja": "1 Tahun", "birthPlace": "Palembang", "birthDate": "1986-07-01", "religion": "Islam", "maritalStatus": "Belum Menikah", "status": "Kontrak" },
+            { "id": "AM2-008", "name": "Faisal Malik", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "L", "phone": "081234567897", "email": "faisal@example.com", "address": "Jl. Contoh No. 8", "joinDate": "2020-08-01", "nik": "3201010101010008", "npp": "NPP-008", "golongan": "I/d", "pangkat": "Juru Tk. I", "masaKerja": "1 Tahun", "birthPlace": "Denpasar", "birthDate": "1987-08-01", "religion": "Islam", "maritalStatus": "Belum Menikah", "status": "Kontrak" },
+            { "id": "AM2-009", "name": "Fitriyani S. Rajabessy", "workUnit": "Kantor Cabang", "role": "Staf", "password": "123", "gender": "P", "phone": "081234567898", "email": "fitriyani@example.com", "address": "Jl. Contoh No. 9", "joinDate": "2020-09-01", "nik": "3201010101010009", "npp": "NPP-009", "golongan": "I/c", "pangkat": "Juru", "masaKerja": "1 Tahun", "birthPlace": "Yogyakarta", "birthDate": "1988-09-01", "religion": "Islam", "maritalStatus": "Belum Menikah", "status": "Kontrak" }
+        ];
+
+        const DB = {
+            getEmployees: () => {
+                const data = JSON.parse(localStorage.getItem('employees_data') || "[]");
+                if (data.length === 0) return DEFAULT_EMPLOYEES;
+                return data;
+            },
+            saveEmployees: (data) => localStorage.setItem('employees_data', JSON.stringify(data)),
+            getAttendance: () => JSON.parse(localStorage.getItem('attendance_records') || "[]"),
+            saveAttendance: (data) => localStorage.setItem('attendance_records', JSON.stringify(data)),
+            addAttendanceRecord: (record) => {
+                const records = DB.getAttendance();
+                // Upsert logic for single record per day
+                const dateStr = (record.timestamp || "").slice(0, 10);
+                const idx = records.findIndex(r => r.employeeId === record.employeeId && (r.timestamp || "").startsWith(dateStr));
+                
+                if (idx >= 0) {
+                    // Merge fields
+                    records[idx] = { ...records[idx], ...record };
+                    // Ensure ID doesn't change if it was set
+                    records[idx].recordId = records[idx].recordId || record.recordId;
+                } else {
+                    records.push(record);
+                }
+                DB.saveAttendance(records);
+            }
+        };
+
+        // --- UI Components ---
+        function si({label:e,error:t,icon:r,className:n="",...a}){return m.jsxs("div",{className:n,children:[e&&m.jsx("label",{className:"block text-sm font-medium text-gray-700 mb-2",children:e}),m.jsxs("div",{className:"relative",children:[r&&m.jsx(r,{className:"absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5"}),m.jsx("input",{className:`w-full ${r?"pl-10":"pl-4"} pr-4 py-3 bg-gray-50 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none ${t?"border-red-300 focus:ring-red-200":"border-gray-200"}`,...a})]}),t&&m.jsxs("p",{className:"mt-1 text-sm text-red-600 flex items-center gap-1",children:[m.jsx("span",{className:"w-1 h-1 bg-red-600 rounded-full"}),t]})]})}
+        
+        function eh({children:e,variant:t="primary",size:r="md",isLoading:n=!1,disabled:a=!1,className:i="",icon:A,...s}){const o="inline-flex items-center justify-center font-semibold transition-all active:scale-95 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100",l={primary:"bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30",secondary:"bg-white border border-gray-200 text-gray-700 hover:bg-gray-50",danger:"bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-blue-600/30",outline:"border-2 border-blue-600 text-blue-600 hover:bg-blue-50",ghost:"text-gray-600 hover:bg-gray-100"},c={sm:"px-3 py-1.5 text-sm",md:"px-6 py-3 text-base",lg:"px-8 py-4 text-lg"};return m.jsxs("button",{disabled:a||n,className:`${o} ${l[t]} ${c[r]} ${i}`,...s,children:[n?m.jsx(D7,{className:"w-5 h-5 animate-spin mr-2"}):A?m.jsx(A,{className:"w-5 h-5 mr-2"}):null,e]})}
+
+        // --- X7.js (Login) ---
+        function X7({onLogin, onOpenIDCard}) {
+            const [id, setId] = React.useState("");
+            const [password, setPassword] = React.useState("");
+            const [error, setError] = React.useState("");
+            const [showConfig, setShowConfig] = React.useState(false);
+            const [syncMsg, setSyncMsg] = React.useState("");
+            const [employees, setEmployees] = React.useState([]);
+            const [selectedEmployeeId, setSelectedEmployeeId] = React.useState("");
+
+            React.useEffect(() => {
+                try {
+                    if (typeof DB !== "undefined" && DB && typeof DB.getEmployees === "function") {
+                        const list = DB.getEmployees() || [];
+                        const normalized = Array.isArray(list) ? list.filter((e) => e && e.id && e.name) : [];
+                        setEmployees(normalized);
+                    } else {
+                        setEmployees([]);
+                    }
+                } catch (_) {
+                    setEmployees([]);
+                }
+            }, []);
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!id || !password) {
+                    setError("Mohon isi semua field");
+                    return;
+                }
+                onLogin(id, password);
+            };
+
+            const handleSync = async (url) => {
+                if (!url) return;
+                localStorage.setItem(ENDPOINT_KEY, url);
+                setSyncMsg("Menghubungkan...");
+                try {
+                    const res = await pullFromSheetAndMerge();
+                    if (res.ok) {
+                        setSyncMsg("Berhasil sinkron! Reloading...");
+                        setTimeout(() => window.location.reload(), 1500);
+                    } else {
+                        setSyncMsg("Gagal: " + res.reason);
+                    }
+                } catch (err) {
+                    setSyncMsg("Error: " + err.message);
+                }
+            };
+
+            return m.jsx("div", { className: "min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 to-blue-100 p-4", children: 
+                m.jsxs("div", { className: "bg-white/80 backdrop-blur-lg p-8 rounded-2xl shadow-xl w-full max-w-md border border-white/50", children: [
+                    m.jsxs("div", { className: "text-center mb-8", children: [
+                        m.jsx("div", { className: "w-16 h-16 bg-blue-600 rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-lg shadow-blue-600/20", children: 
+                            m.jsx(Z0, { className: "text-white w-8 h-8" }) 
+                        }),
+                        m.jsx("h1", { className: "text-2xl font-bold text-gray-800", children: "Sistem Absensi Karyawan" }),
+                        m.jsx("p", { className: "text-gray-500 mt-2", children: "Silakan masuk untuk melanjutkan" })
+                    ]}),
+                    
+                    m.jsxs("form", { onSubmit: handleSubmit, className: "space-y-6", children: [
+                        m.jsxs("div", { className: "space-y-2", children: [
+                            m.jsx("label", { className: "block text-sm font-medium text-gray-700", children: "Pilih Nama Karyawan (opsional)" }),
+                            m.jsxs("select", {
+                                className: "w-full px-4 py-3 bg-gray-50 border rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none",
+                                value: selectedEmployeeId,
+                                onChange: (e) => {
+                                    const val = e.target.value;
+                                    setSelectedEmployeeId(val);
+                                    if (val) {
+                                        setId(val);
+                                    }
+                                },
+                                children: [
+                                    m.jsx("option", { value: "", children: "-- Pilih Nama --" }),
+                                    employees.map((emp) => 
+                                        m.jsx("option", { value: emp.id, children: emp.name }, emp.id)
+                                    )
+                                ]
+                            })
+                        ]}),
+                        m.jsx(si, { label: "ID Karyawan / Admin", icon: Z0, type: "text", value: id, onChange: (e) => setId(e.target.value), placeholder: "Masukkan ID Anda" }),
+                        m.jsx(si, { label: "Password", icon: R7, type: "password", value: password, onChange: (e) => setPassword(e.target.value), placeholder: "Masukkan Password" }),
+                        
+                        error && m.jsxs("div", { className: "p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center gap-2", children: [
+                            m.jsx("div", { className: "w-1.5 h-1.5 bg-red-500 rounded-full" }),
+                            error
+                        ]}),
+                        
+                        m.jsx(eh, { type: "submit", className: "w-full", icon: M7, children: "Masuk" })
+                    ]}),
+
+                    m.jsxs("div", { className: "mt-6 pt-6 border-t border-gray-100 text-center space-y-2", children: [
+                        m.jsx("button", { 
+                            type: "button", 
+                            onClick: () => setShowConfig(true), 
+                            className: "text-sm text-gray-400 hover:text-blue-600 transition-colors flex items-center justify-center gap-2 mx-auto", 
+                            children: "⚙️ Setup Server"
+                        }),
+                        syncMsg && m.jsx("div", { className: "text-xs text-orange-500", children: syncMsg })
+                    ]}),
+
+                    m.jsx(ModalInput, {
+                        isOpen: showConfig,
+                        onClose: () => setShowConfig(false),
+                        onSave: handleSync,
+                        initialValue: localStorage.getItem(ENDPOINT_KEY) || "",
+                        title: "Masukkan URL Web App Google Script"
+                    })
+                ]})
+            });
+        }
+
+        const ENDPOINT_KEY = "absensi_endpoint_v1";
+        const SETTINGS_KEY = "absensi_system_settings_v1";
+
+        const DEFAULT_SETTINGS = {
+            kopSurat: {
+                line1: "TIPE PERUSAHAAN",
+                line2: "NAMA PERUSAHAAN",
+                line3: "NAMA KOTA/KABUPATEN",
+                line4: "NAMA KANTOR UNIT/CABANG",
+                line5: "ALAMAT PERUSAHAAN",
+                line6: "NO. TELP/HP DAN EMAIL"
+            },
+            kantor: {
+                tipe: "Cabang",
+                nama: "Kantor Cabang",
+                address: "",
+                lat: "",
+                lng: "",
+                radiusM: "200"
+            },
+            shifts: [
+                { name: "Pagi", jamMasuk: "08:00", jamPulang: "17:00", toleransiTerlambatMenit: 15 }
+            ],
+            kehadiran: {
+                jamMasuk: "08:00",
+                toleransiTerlambatMenit: 15,
+                jamPulang: "17:00",
+                statusTersedia: ["Hadir", "Tepat Waktu", "Terlambat", "Pulang Cepat", "Lembur", "Sakit", "Izin", "Cuti"]
+            },
+            organisasi: {
+                unitKerjaTersedia: ["Kantor Pusat", "Kantor Cabang"],
+                jabatanTersedia: ["Kepala Unit", "Staf"],
+                hirarkiTersedia: ["Pimpinan", "Kepala Unit", "Staf"]
+            }
+        };
+
+        function getSystemSettings() {
+            try {
+                const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null");
+                if (!raw || typeof raw !== "object") return DEFAULT_SETTINGS;
+                const rawKop = (raw && raw.kopSurat && typeof raw.kopSurat === "object") ? raw.kopSurat : {};
+                const hasNewLines = ["line3", "line4", "line5", "line6"].some((k) => rawKop[k] !== undefined && rawKop[k] !== null && String(rawKop[k]).trim().length > 0);
+                const migratedKop = hasNewLines ? {
+                    line1: String(rawKop.line1 || DEFAULT_SETTINGS.kopSurat.line1),
+                    line2: String(rawKop.line2 || DEFAULT_SETTINGS.kopSurat.line2),
+                    line3: String(rawKop.line3 || rawKop.city || DEFAULT_SETTINGS.kopSurat.line3),
+                    line4: String(rawKop.line4 || rawKop.unit || DEFAULT_SETTINGS.kopSurat.line4),
+                    line5: String(rawKop.line5 || rawKop.address || DEFAULT_SETTINGS.kopSurat.line5),
+                    line6: String(rawKop.line6 || [rawKop.phone, rawKop.email].filter(Boolean).join(" | ") || DEFAULT_SETTINGS.kopSurat.line6)
+                } : {
+                    line1: String(DEFAULT_SETTINGS.kopSurat.line1),
+                    line2: String(rawKop.line1 || DEFAULT_SETTINGS.kopSurat.line2),
+                    line3: String(rawKop.city || DEFAULT_SETTINGS.kopSurat.line3),
+                    line4: String(rawKop.line2 || rawKop.unit || DEFAULT_SETTINGS.kopSurat.line4),
+                    line5: String(rawKop.address || DEFAULT_SETTINGS.kopSurat.line5),
+                    line6: String([rawKop.phone, rawKop.email].filter(Boolean).join(" | ") || DEFAULT_SETTINGS.kopSurat.line6)
+                };
+                const merged = {
+                    ...DEFAULT_SETTINGS,
+                    ...raw,
+                    kopSurat: migratedKop,
+                    kantor: { ...DEFAULT_SETTINGS.kantor, ...(raw.kantor || {}) },
+                    kehadiran: { ...DEFAULT_SETTINGS.kehadiran, ...(raw.kehadiran || {}) },
+                    organisasi: { ...DEFAULT_SETTINGS.organisasi, ...(raw.organisasi || {}) }
+                };
+                merged.kehadiran.statusTersedia = Array.isArray(merged.kehadiran.statusTersedia) ? merged.kehadiran.statusTersedia : DEFAULT_SETTINGS.kehadiran.statusTersedia;
+                return merged;
+            } catch (_) {
+                return DEFAULT_SETTINGS;
+            }
+        }
+
+        function saveSystemSettings(settings) {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        }
+
+        function timeToMinutes(hhmm) {
+            const s = String(hhmm || "");
+            const parts = s.split(":");
+            const h = Number(parts[0] || 0);
+            const m = Number(parts[1] || 0);
+            if (!Number.isFinite(h) || !Number.isFinite(m)) return 0;
+            return h * 60 + m;
+        }
+
+        function computeCheckInStatus(isoTimestamp, shiftName) {
+            const settings = getSystemSettings();
+            const shifts = Array.isArray(settings.shifts) ? settings.shifts : [];
+            const t = new Date(isoTimestamp);
+            if (Number.isNaN(t.getTime())) return "Tepat Waktu";
+            let start = timeToMinutes(settings.kehadiran.jamMasuk);
+            let tolerance = Number(settings.kehadiran.toleransiTerlambatMenit || 0);
+            if (shiftName && shifts.length > 0) {
+                const s = shifts.find(sh => String(sh.name || "").toLowerCase() === String(shiftName || "").toLowerCase());
+                if (s) {
+                    if (s.jamMasuk) start = timeToMinutes(s.jamMasuk);
+                    if (s.toleransiTerlambatMenit !== undefined && s.toleransiTerlambatMenit !== null) {
+                        tolerance = Number(s.toleransiTerlambatMenit);
+                    }
+                }
+            }
+            const nowMinutes = t.getHours() * 60 + t.getMinutes();
+            
+            if (nowMinutes > (start + tolerance)) return "Terlambat";
+            return "Tepat Waktu";
+        }
+
+        function computeCheckOutStatus(isoTimestamp, shiftName) {
+            const settings = getSystemSettings();
+            const shifts = Array.isArray(settings.shifts) ? settings.shifts : [];
+            const t = new Date(isoTimestamp);
+            if (Number.isNaN(t.getTime())) return "Tepat Waktu";
+            let end = timeToMinutes(settings.kehadiran.jamPulang);
+            if (shiftName && shifts.length > 0) {
+                const s = shifts.find(sh => String(sh.name || "").toLowerCase() === String(shiftName || "").toLowerCase());
+                if (s && s.jamPulang) end = timeToMinutes(s.jamPulang);
+            }
+            const nowMinutes = t.getHours() * 60 + t.getMinutes();
+            
+            if (nowMinutes < end) return "Pulang Cepat";
+            if (nowMinutes >= (end + 60)) return "Lembur";
+            return "Tepat Waktu";
+        }
+
+        // --- Geolocation Helper ---
+        function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // Radius bumi dalam meter
+            const dLat = deg2rad(lat2 - lat1);
+            const dLon = deg2rad(lon2 - lon1);
+            const a = 
+                Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * 
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c; // Jarak dalam meter
+        }
+
+        function deg2rad(deg) {
+            return deg * (Math.PI/180);
+        }
+
+        async function sendToSheet(data) {
+            const url = localStorage.getItem(ENDPOINT_KEY);
+            if (!url) return;
+            try {
+                await fetch(url, {
+                    method: "POST",
+                    mode: "no-cors", // Important for Google Apps Script usually
+                    headers: { "Content-Type": "text/plain" },
+                    body: JSON.stringify(data)
+                });
+            } catch (e) {
+                console.error("Sync Error:", e);
+            }
+        }
+
+        function buildEndpointUrl(baseUrl, params) {
+            const base = (baseUrl || "").trim();
+            if (!base) return "";
+            const query = Object.entries(params || {})
+                .filter(([_, v]) => v !== undefined && v !== null && String(v).length > 0)
+                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+                .join("&");
+            if (!query) return base;
+            return base + (base.includes("?") ? "&" : "?") + query;
+        }
+
+        async function jsonpRequest(url, params, { timeoutMs = 12000, retries = 2 } = {}) {
+            const doRequest = () => new Promise((resolve, reject) => {
+                const callbackName = `__absensi_jsonp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+                const fullUrl = buildEndpointUrl(url, { ...(params || {}), callback: callbackName });
+                if (!fullUrl) {
+                    reject(new Error("URL kosong"));
+                    return;
+                }
+
+                let settled = false;
+                const cleanup = () => {
+                    try { delete window[callbackName]; } catch (_) { window[callbackName] = undefined; }
+                    if (script && script.parentNode) script.parentNode.removeChild(script);
+                    if (timer) clearTimeout(timer);
+                };
+
+                window[callbackName] = (data) => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    resolve(data);
+                };
+
+                const script = document.createElement("script");
+                script.src = fullUrl;
+                script.async = true;
+                script.onerror = () => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    reject(new Error("Gagal memuat data dari server"));
+                };
+
+                const timer = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    cleanup();
+                    reject(new Error("Timeout mengambil data dari server"));
+                }, timeoutMs);
+
+                document.head.appendChild(script);
+            });
+
+            let lastError;
+            for (let i = 0; i <= retries; i++) {
+                try {
+                    return await doRequest();
+                } catch (e) {
+                    lastError = e;
+                    if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+                }
+            }
+            throw lastError;
+        }
+
+        function recordKey(r) {
+            if (!r) return "";
+            return r.recordId || r.id || `${r.employeeId || ""}_${r.timestamp || ""}_${r.type || ""}`;
+        }
+
+        function mergeByKey(localArr, remoteArr) {
+            const out = [];
+            const map = new Map();
+            (Array.isArray(localArr) ? localArr : []).forEach((r) => {
+                const k = recordKey(r);
+                if (!k) return;
+                map.set(k, r);
+            });
+            (Array.isArray(remoteArr) ? remoteArr : []).forEach((r) => {
+                const k = recordKey(r);
+                if (!k) return;
+                map.set(k, { ...map.get(k), ...r, recordId: k });
+            });
+            map.forEach((v) => out.push(v));
+            out.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            return out;
+        }
+
+        const formatTime = (val) => {
+            if (!val || val === '-') return '-';
+            try {
+                if (typeof val === 'string' && val.match(/^\d{1,2}[:.]\d{2}/)) {
+                    return val.substring(0, 5).replace('.', ':');
+                }
+                const d = new Date(val);
+                if (!isNaN(d.getTime())) {
+                    const h = String(d.getHours()).padStart(2, '0');
+                    const m = String(d.getMinutes()).padStart(2, '0');
+                    return `${h}:${m}`;
+                }
+            } catch (e) { return String(val).substring(0, 5); }
+            return String(val).substring(0, 5);
+        };
+
+        const formatDate = (dateString, defaultToNow = false) => {
+            if (!dateString || dateString === '-' || dateString === 'null') {
+                if (defaultToNow) return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                return '-';
+            }
+            try {
+                const date = new Date(dateString);
+                if (isNaN(date.getTime())) {
+                    if (defaultToNow) return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                    return dateString;
+                }
+                return date.toLocaleDateString('id-ID', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric'
+                });
+            } catch (e) {
+                if (defaultToNow) return new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                return dateString;
+            }
+        };
+
+        const fixSheetDate = (isoStr) => {
+            if (!isoStr || isoStr === "-" || isoStr === "null") return "";
+            try {
+                const d = new Date(isoStr);
+                if (isNaN(d.getTime())) return isoStr;
+                d.setHours(d.getHours() + 12);
+                return d.toISOString().slice(0, 10);
+            } catch (e) {
+                return isoStr;
+            }
+        };
+
+        async function pullFromSheetAndMerge({ includeEmployees = true, includeAttendance = true } = {}) {
+            const baseUrl = localStorage.getItem(ENDPOINT_KEY);
+            if (!baseUrl) return { ok: false, reason: "no-endpoint" };
+            if (typeof navigator !== "undefined" && navigator.onLine === false) return { ok: false, reason: "offline" };
+
+            const data = await jsonpRequest(baseUrl, { action: "export" });
+            if (!data || data.status !== "success") return { ok: false, reason: "bad-response" };
+
+            if (includeEmployees && Array.isArray(data.employees) && data.employees.length > 0) {
+                const normalizedEmployees = data.employees.map((e) => ({
+                    id: String(e.id || e.ID || e.nik || e.NIK || ""),
+                    name: String(e.name || e.nama || e.Nama || ""),
+                    workUnit: String(e.workUnit || e.unitKerja || e.UnitKerja || ""),
+                    role: String(e.role || e.jabatan || e.Jabatan || ""),
+                    password: String(e.password || "123"),
+                    gender: String(e.gender || e.jenisKelamin || e.JenisKelamin || "L"),
+                    phone: String(e.phone || e.noHP || e["No. HP"] || ""),
+                    email: String(e.email || e.Email || ""),
+                    address: String(e.address || e.alamat || e.Alamat || ""),
+                    joinDate: fixSheetDate(String(e.joinDate || e.tanggalBergabung || e.TanggalBergabung || "")),
+                    nik: String(e.nik || e.NIK || ""),
+                    npp: String(e.npp || e.NPP || ""),
+                    golongan: String(e.golongan || e.Golongan || ""),
+                    pangkat: String(e.pangkat || e.Pangkat || ""),
+                    masaKerja: String(e.masaKerja || e.MasaKerja || ""),
+                    birthPlace: String(e.birthPlace || e.tempatLahir || e.TempatLahir || ""),
+                    birthDate: fixSheetDate(String(e.birthDate || e.tanggalLahir || e.TanggalLahir || "")),
+                    religion: String(e.religion || e.agama || e.Agama || ""),
+                    maritalStatus: String(e.maritalStatus || e.statusPerkawinan || e.StatusPerkawinan || ""),
+                    status: String(e.status || e.statusKaryawan || e.StatusKaryawan || ""),
+                    photoUrl: String(e.photoUrl || e.foto || e.fotoUrl || e.linkFoto || "")
+                })).filter((e) => e.id);
+                if (normalizedEmployees.length > 0) DB.saveEmployees(normalizedEmployees);
+            }
+
+            if (includeAttendance && Array.isArray(data.attendance)) {
+                const local = DB.getAttendance();
+                const remote = data.attendance.map((r) => ({ ...r, recordId: recordKey(r) }));
+                const merged = mergeByKey(local, remote);
+                DB.saveAttendance(merged);
+            }
+
+            if (data.settings && typeof data.settings === "object") {
+                const local = getSystemSettings();
+                const remote = data.settings || {};
+                const mergedSettings = {
+                    ...local,
+                    ...remote,
+                    kopSurat: { ...local.kopSurat, ...(remote.kopSurat || {}) },
+                    kantor: { ...local.kantor, ...(remote.kantor || {}) },
+                    kehadiran: { ...local.kehadiran, ...(remote.kehadiran || {}) },
+                    organisasi: { ...local.organisasi, ...(remote.organisasi || {}) }
+                };
+                saveSystemSettings(mergedSettings);
+            }
+
+            return { ok: true, serverTime: data.serverTime || "" };
+        }
+
+        // --- Modal Input Component ---
+        function ModalInput({ isOpen, onClose, onSave, initialValue, title }) {
+            const [value, setValue] = ot.useState(initialValue);
+            
+            ot.useEffect(() => {
+                if (isOpen) setValue(initialValue);
+            }, [isOpen, initialValue]);
+
+            if (!isOpen) return null;
+
+            return m.jsx("div", { className: "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4", children: 
+                m.jsxs("div", { className: "bg-white rounded-2xl shadow-xl w-full max-w-sm p-6", children: [
+                    m.jsx("h3", { className: "text-lg font-bold text-gray-800 mb-4", children: title }),
+                    m.jsx("input", { 
+                        type: "text", 
+                        value: value, 
+                        onChange: (e) => setValue(e.target.value),
+                        className: "w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none mb-6",
+                        placeholder: "https://..."
+                    }),
+                    m.jsxs("div", { className: "flex justify-end gap-3", children: [
+                        m.jsx("button", { 
+                            onClick: onClose,
+                            className: "px-4 py-2 text-gray-500 font-medium hover:bg-gray-100 rounded-lg transition-colors",
+                            children: "Batal"
+                        }),
+                        m.jsx("button", { 
+                            onClick: () => { onSave(value); onClose(); },
+                            className: "px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20",
+                            children: "Simpan"
+                        })
+                    ]})
+                ]})
+            });
+        }
+
+        // --- Y7.js (Simple Dashboard + Sync) ---
+        function Y7({ user }){
+            const [time, setTime] = ot.useState(new Date());
+            const [history, setHistory] = ot.useState([]);
+            const [syncStatus, setSyncStatus] = ot.useState("");
+            const [showConfig, setShowConfig] = ot.useState(false);
+            const [shift, setShift] = ot.useState("Pagi");
+            const [workLocation, setWorkLocation] = ot.useState("Kantor");
+            const [notes, setNotes] = ot.useState("");
+            const [showLeave, setShowLeave] = ot.useState(false);
+            const [leaveType, setLeaveType] = ot.useState("izin");
+            const [leaveNotes, setLeaveNotes] = ot.useState("");
+            const [isEditingProfile, setIsEditingProfile] = ot.useState(false);
+            const [editForm, setEditForm] = ot.useState({
+                phone: user.phone || "",
+                email: user.email || "",
+                address: user.address || "",
+                password: ""
+            });
+            const didSync = ot.useRef(false);
+
+            ot.useEffect(() => {
+                const timer = setInterval(() => setTime(new Date()), 1000);
+                const refresh = () => {
+                    const all = DB.getAttendance();
+                    const today = new Date().toISOString().slice(0, 10);
+                    const myHistory = all
+                        .filter(r => r.employeeId === user.id && r.timestamp && r.timestamp.startsWith(today))
+                        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    setHistory(myHistory);
+                };
+                refresh();
+                
+                // Check endpoint status
+                if(!localStorage.getItem(ENDPOINT_KEY)) setSyncStatus("⚠️ Server belum diset");
+                if (!didSync.current && localStorage.getItem(ENDPOINT_KEY)) {
+                    didSync.current = true;
+                    setSyncStatus("Sinkronisasi...");
+                    pullFromSheetAndMerge()
+                        .then((res) => {
+                            if (res && res.ok) {
+                                refresh();
+                                
+                                // Update session user if data changed
+                                const latestEmployees = DB.getEmployees();
+                                const updatedUser = latestEmployees.find(e => e.id === user.id);
+                                if (updatedUser) {
+                                    const oldJson = JSON.stringify(user);
+                                    const newJson = JSON.stringify(updatedUser);
+                                    if (oldJson !== newJson) {
+                                        localStorage.setItem('session_user', newJson);
+                                        // Reload if photo changed to show it immediately
+                                        if (updatedUser.photoUrl !== user.photoUrl) {
+                                             window.location.reload();
+                                        }
+                                    }
+                                }
+
+                                setSyncStatus("Sinkron selesai");
+                                setTimeout(() => setSyncStatus(""), 1200);
+                            } else {
+                                setSyncStatus("Mode offline");
+                            }
+                        })
+                        .catch(() => setSyncStatus("Mode offline"));
+                }
+
+                return () => clearInterval(timer);
+            }, [user.id]);
+
+            const startEditing = () => {
+                setEditForm({
+                    phone: user.phone || "",
+                    email: user.email || "",
+                    address: user.address || "",
+                    password: ""
+                });
+                setIsEditingProfile(true);
+            };
+
+            const saveProfile = async () => {
+                try {
+                    const updatedUser = { 
+                        ...user, 
+                        phone: editForm.phone, 
+                        email: editForm.email, 
+                        address: editForm.address 
+                    };
+                    if (editForm.password) {
+                        updatedUser.password = editForm.password;
+                    }
+
+                    // Save locally
+                    const all = DB.getEmployees();
+                    const updatedAll = all.map(emp => emp.id === user.id ? updatedUser : emp);
+                    DB.saveEmployees(updatedAll);
+                    localStorage.setItem('session_user', JSON.stringify(updatedUser));
+
+                    // Sync to Server
+                    setSyncStatus("Menyimpan Profil...");
+                    const url = localStorage.getItem(ENDPOINT_KEY);
+                    if (url) {
+                        await sendToSheet({ action: "update_employee", ...updatedUser });
+                        setSyncStatus("Profil Tersimpan!");
+                    } else {
+                        setSyncStatus("Disimpan Lokal (Offline)");
+                    }
+                    
+                    alert("Data diri berhasil diperbarui!");
+                    window.location.reload();
+                } catch (e) {
+                    alert("Gagal menyimpan: " + e.message);
+                }
+            };
+
+            const handlePhotoUpdate = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 500 * 1024) {
+                        alert("Ukuran foto maksimal 500KB");
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const newPhoto = reader.result;
+                        const all = DB.getEmployees();
+                        const updatedAll = all.map(emp => emp.id === user.id ? { ...emp, photoUrl: newPhoto } : emp);
+                        DB.saveEmployees(updatedAll);
+                        const updatedUser = { ...user, photoUrl: newPhoto };
+                        localStorage.setItem('session_user', JSON.stringify(updatedUser));
+                        alert("Foto profil berhasil diperbarui!");
+                        window.location.reload(); 
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const doAbsensi = async (type) => {
+                try {
+                    const settings = getSystemSettings();
+                    
+                    // 0. Validasi Lokasi (GPS) jika pilih "Kantor"
+                    let locationData = { lat: "", lng: "" };
+                    
+                    if (workLocation === 'Kantor') {
+                        // Cek apakah koordinat kantor sudah di-set
+                        const officeLat = parseFloat(settings.kantor?.lat);
+                        const officeLng = parseFloat(settings.kantor?.lng);
+                        const radiusM = parseFloat(settings.kantor?.radiusM) || 200;
+
+                        if (officeLat && officeLng) {
+                            if (!navigator.geolocation) {
+                                alert("Browser Anda tidak mendukung Geolocation.");
+                                return;
+                            }
+
+                            // Ambil lokasi saat ini
+                            const position = await new Promise((resolve, reject) => {
+                                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                    enableHighAccuracy: true,
+                                    timeout: 10000,
+                                    maximumAge: 0
+                                });
+                            });
+
+                            const currentLat = position.coords.latitude;
+                            const currentLng = position.coords.longitude;
+                            locationData = { lat: currentLat, lng: currentLng };
+
+                            const distance = getDistanceFromLatLonInM(currentLat, currentLng, officeLat, officeLng);
+                            
+                            if (distance > radiusM) {
+                                alert(`Absensi DITOLAK!\\n\\nAnda berada di luar jangkauan kantor.\\nJarak Anda: ${Math.round(distance)} meter\\nRadius Diizinkan: ${radiusM} meter`);
+                                return; // STOP eksekusi
+                            }
+                        }
+                    }
+
+                    const timestamp = new Date().toISOString();
+                    const hhmm = formatTime(timestamp);
+                    
+                    const statusTersedia = (settings.kehadiran && Array.isArray(settings.kehadiran.statusTersedia)) ? settings.kehadiran.statusTersedia : ["Hadir", "Tepat Waktu", "Terlambat", "Pulang Cepat", "Lembur", "Sakit", "Izin", "Cuti"];
+                    const statusValue = type === 'check-out'
+                        ? computeCheckOutStatus(timestamp, shift)
+                        : computeCheckInStatus(timestamp, shift);
+                    
+                    const isCheckIn = type === 'check-in';
+                    const isCheckOut = type === 'check-out';
+
+                    const record = {
+                        recordId: `${user.id}_${timestamp.slice(0, 10)}`,
+                        employeeId: user.id,
+                        employeeName: user.name,
+                        workUnit: user.workUnit || 'Kantor Pusat',
+                        timestamp: timestamp,
+                        type: type,
+                        
+                        ...(isCheckIn ? {
+                            jamMasuk: hhmm,
+                            typeMasuk: "Masuk",
+                            statusMasuk: statusValue
+                        } : {}),
+
+                        ...(isCheckOut ? {
+                            jamKeluar: hhmm,
+                            typeKeluar: "Pulang",
+                            statusKeluar: statusValue
+                        } : {}),
+
+                        shift: shift,
+                        workLocation: workLocation,
+                        notes: notes,
+                        method: 'Web App Simple',
+                        leaveType: "",
+                        latitude: locationData.lat,
+                        longitude: locationData.lng
+                    };
+
+                    // 1. Simpan Lokal
+                    DB.addAttendanceRecord(record);
+                
+                    // 2. Kirim ke Spreadsheet
+                    setSyncStatus("Mengirim...");
+                    const url = localStorage.getItem(ENDPOINT_KEY);
+                    if (url) {
+                        const savedRecords = DB.getAttendance();
+                        const mergedRecord = savedRecords.find(r => r.recordId === record.recordId) || record;
+                        await sendToSheet({ action: "attendance", ...mergedRecord });
+                        setSyncStatus("Terkirim (Background)");
+                    } else {
+                        setSyncStatus("Disimpan Lokal Saja");
+                    }
+
+                    alert(`Berhasil ${type === 'check-in' ? 'Masuk' : 'Pulang'}!`);
+                    window.location.reload();
+                } catch(e) { alert(e.message); }
+            };
+
+            const doLeave = async () => {
+                try {
+                    const timestamp = new Date().toISOString();
+                    const hhmm = formatTime(timestamp);
+                    const allowed = new Set(["sakit", "izin", "cuti"]);
+                    const status = allowed.has(String(leaveType || "").toLowerCase()) ? String(leaveType || "").toLowerCase() : "izin";
+                    const record = {
+                        recordId: `${user.id}_${timestamp.slice(0, 10)}`,
+                        employeeId: user.id,
+                        employeeName: user.name,
+                        workUnit: user.workUnit || 'Kantor Pusat',
+                        timestamp: timestamp,
+                        type: "leave",
+                        
+                        jamMasuk: "-",
+                        typeMasuk: "Leave",
+                        statusMasuk: status,
+                        
+                        jamKeluar: "-",
+                        typeKeluar: "Leave",
+                        statusKeluar: status,
+
+                        shift: shift,
+                        workLocation: workLocation,
+                        notes: leaveNotes || notes,
+                        method: 'Web App Simple',
+                        leaveType: status
+                    };
+
+                    DB.addAttendanceRecord(record);
+
+                    setSyncStatus("Mengirim...");
+                    const url = localStorage.getItem(ENDPOINT_KEY);
+                    if (url) {
+                        await sendToSheet({ action: "attendance", ...record });
+                        setSyncStatus("Terkirim (Background)");
+                    } else {
+                        setSyncStatus("Disimpan Lokal Saja");
+                    }
+
+                    alert(`Berhasil mengajukan ${status.toUpperCase()} (${hhmm})`);
+                    window.location.reload();
+                } catch (e) { alert(e.message); }
+            };
+
+            const saveEndpoint = (url) => {
+                if (url) {
+                    localStorage.setItem(ENDPOINT_KEY, url.trim());
+                    setSyncStatus("");
+                    alert("URL Server tersimpan!");
+                }
+            };
+
+            return m.jsxs("div", { className: "min-h-screen flex flex-col items-center justify-center p-4 bg-gray-50", children: [
+                m.jsxs("div", { className: "bg-white p-8 rounded-3xl shadow-lg w-full max-w-md text-center", children: [
+                    m.jsxs("div", { className: "mb-6 flex flex-col items-center", children: [
+                        m.jsx("label", { className: "relative cursor-pointer group", children: [
+                            user.photoUrl 
+                                ? m.jsx("img", { src: user.photoUrl, className: "w-24 h-24 rounded-full object-cover border-4 border-blue-50 shadow-sm animate-fade-in group-hover:opacity-75 transition-opacity" })
+                                : m.jsx("div", { className: "w-24 h-24 rounded-full bg-blue-50 flex items-center justify-center text-blue-300 animate-fade-in group-hover:bg-blue-100 transition-colors", children: m.jsx(Z0, { className: "w-10 h-10" }) }),
+                            
+                            m.jsx("div", { className: "absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity", children: 
+                                m.jsx("span", { className: "bg-black/50 text-white text-xs px-2 py-1 rounded-full", children: "Ubah" })
+                            }),
+                            
+                            m.jsx("input", { 
+                                type: "file", 
+                                accept: "image/*", 
+                                className: "hidden", 
+                                onChange: handlePhotoUpdate 
+                            })
+                        ]}),
+                    ]}),
+                    m.jsx("h1", { className: "text-xl font-bold text-gray-800", children: `Halo, ${user.name}` }),
+                    
+                    !isEditingProfile ? m.jsxs("div", { className: "mb-6 mt-4 p-4 bg-blue-50 rounded-xl text-center text-sm text-gray-700 space-y-2 border border-blue-100 relative", children: [
+                        m.jsx("div", { className: "font-bold text-lg text-blue-800 uppercase", children: user.name }),
+                        m.jsxs("div", { className: "font-mono text-gray-600", children: ["NPP: ", user.npp || "-"] }),
+                        m.jsxs("div", { className: "text-gray-500 text-xs mt-2 pt-2 border-t border-blue-200", children: [
+                            m.jsx("div", { children: user.phone || "(No HP Kosong)" }),
+                            m.jsx("div", { children: user.email || "(Email Kosong)" }),
+                            m.jsx("div", { children: user.address || "(Alamat Kosong)" })
+                        ]}),
+                        m.jsx("button", { 
+                            onClick: startEditing,
+                            className: "absolute top-2 right-2 text-blue-600 hover:text-blue-800",
+                            title: "Ubah Data Diri",
+                            children: m.jsx(Tt("Edit2", [["path", { d: "M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" }]]), { className: "w-4 h-4" })
+                        })
+                    ]}) : m.jsxs("div", { className: "mb-6 mt-4 p-4 bg-white rounded-xl text-left text-sm space-y-3 border border-blue-200 shadow-sm animate-fade-in", children: [
+                        m.jsx("h3", { className: "font-bold text-center text-gray-800 mb-2", children: "Edit Data Diri" }),
+                        m.jsxs("div", { children: [
+                            m.jsx("label", { className: "block text-xs font-bold text-gray-500 uppercase mb-1", children: "No. HP / WhatsApp" }),
+                            m.jsx("input", { value: editForm.phone, onChange: e => setEditForm({...editForm, phone: e.target.value}), className: "w-full p-2 border rounded-lg bg-gray-50 focus:bg-white transition-colors" })
+                        ]}),
+                        m.jsxs("div", { children: [
+                            m.jsx("label", { className: "block text-xs font-bold text-gray-500 uppercase mb-1", children: "Email" }),
+                            m.jsx("input", { value: editForm.email, onChange: e => setEditForm({...editForm, email: e.target.value}), className: "w-full p-2 border rounded-lg bg-gray-50 focus:bg-white transition-colors" })
+                        ]}),
+                        m.jsxs("div", { children: [
+                            m.jsx("label", { className: "block text-xs font-bold text-gray-500 uppercase mb-1", children: "Alamat Domisili" }),
+                            m.jsx("textarea", { value: editForm.address, onChange: e => setEditForm({...editForm, address: e.target.value}), className: "w-full p-2 border rounded-lg bg-gray-50 focus:bg-white transition-colors", rows: 2 })
+                        ]}),
+                        m.jsxs("div", { children: [
+                            m.jsx("label", { className: "block text-xs font-bold text-gray-500 uppercase mb-1", children: "Password Login" }),
+                            m.jsx("input", { type: "password", value: editForm.password, onChange: e => setEditForm({...editForm, password: e.target.value}), className: "w-full p-2 border rounded-lg bg-gray-50 focus:bg-white transition-colors", placeholder: "Biarkan tetap jika tidak diubah" })
+                        ]}),
+                        m.jsxs("div", { className: "flex gap-2 pt-2", children: [
+                            m.jsx("button", { onClick: () => setIsEditingProfile(false), className: "flex-1 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 font-medium", children: "Batal" }),
+                            m.jsx("button", { onClick: saveProfile, className: "flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-lg shadow-blue-600/20", children: "Simpan" })
+                        ]})
+                    ]}),
+
+                    m.jsx("p", { className: "text-gray-500 text-sm mb-6", children: "Silakan absen di bawah ini" }),
+                    
+                    m.jsx("div", { className: "text-4xl font-mono font-bold text-blue-600 mb-8", children: formatTime(time) }),
+                    
+                    m.jsxs("div", { className: "mb-6 text-left space-y-3", children: [
+                        m.jsxs("div", { children: [
+                            m.jsx("label", { className: "block text-sm font-medium text-gray-700 mb-1", children: "Shift Kerja" }),
+                            m.jsxs("select", { value: shift, onChange: e => setShift(e.target.value), className: "w-full p-2 border rounded-lg", children: [
+                                m.jsx("option", { value: "Pagi", children: "Pagi" }),
+                                m.jsx("option", { value: "Siang", children: "Siang" }),
+                                m.jsx("option", { value: "Malam", children: "Malam" })
+                            ]})
+                        ]}),
+                        m.jsxs("div", { children: [
+                            m.jsx("label", { className: "block text-sm font-medium text-gray-700 mb-1", children: "Lokasi Kerja" }),
+                            m.jsxs("select", { value: workLocation, onChange: e => setWorkLocation(e.target.value), className: "w-full p-2 border rounded-lg", children: [
+                                m.jsx("option", { value: "Kantor", children: "Kantor" }),
+                                m.jsx("option", { value: "WFH", children: "WFH (Rumah)" }),
+                                m.jsx("option", { value: "Dinas Luar", children: "Dinas Luar" })
+                            ]})
+                        ]}),
+                        m.jsxs("div", { children: [
+                            m.jsx("label", { className: "block text-sm font-medium text-gray-700 mb-1", children: "Catatan (Opsional)" }),
+                            m.jsx("textarea", { 
+                                value: notes, 
+                                onChange: e => setNotes(e.target.value), 
+                                className: "w-full p-2 border rounded-lg text-sm", 
+                                placeholder: "Contoh: Meeting di klien...",
+                                rows: 2
+                            })
+                        ]})
+                    ]}),
+
+                    m.jsxs("div", { className: "grid grid-cols-2 gap-4 mb-8", children: [
+                        m.jsx("button", { onClick: () => doAbsensi('check-in'), className: "p-4 bg-green-50 text-green-700 rounded-xl hover:bg-green-100 border border-green-200 transition-all active:scale-95 font-bold", children: "MASUK" }),
+                        m.jsx("button", { onClick: () => doAbsensi('check-out'), className: "p-4 bg-red-50 text-red-700 rounded-xl hover:bg-red-100 border border-red-200 transition-all active:scale-95 font-bold", children: "PULANG" })
+                    ]}),
+
+                    m.jsxs("div", { className: "mb-8", children: [
+                        m.jsx("button", { onClick: () => setShowLeave(!showLeave), className: "w-full p-3 bg-amber-50 text-amber-800 rounded-xl hover:bg-amber-100 border border-amber-200 transition-all font-bold", children: showLeave ? "Tutup Pengajuan" : "Ajukan Sakit / Izin / Cuti" }),
+                        showLeave && m.jsxs("div", { className: "mt-3 p-3 border rounded-xl bg-gray-50 text-left space-y-3", children: [
+                            m.jsxs("div", { children: [
+                                m.jsx("label", { className: "block text-sm font-medium text-gray-700 mb-1", children: "Jenis" }),
+                                m.jsxs("select", { value: leaveType, onChange: e => setLeaveType(e.target.value), className: "w-full p-2 border rounded-lg", children: [
+                                    m.jsx("option", { value: "izin", children: "Izin" }),
+                                    m.jsx("option", { value: "sakit", children: "Sakit" }),
+                                    m.jsx("option", { value: "cuti", children: "Cuti" })
+                                ]})
+                            ]}),
+                            m.jsxs("div", { children: [
+                                m.jsx("label", { className: "block text-sm font-medium text-gray-700 mb-1", children: "Catatan (Opsional)" }),
+                                m.jsx("textarea", { value: leaveNotes, onChange: e => setLeaveNotes(e.target.value), className: "w-full p-2 border rounded-lg text-sm", placeholder: "Contoh: Surat dokter / urusan keluarga...", rows: 2 })
+                            ]}),
+                            m.jsx("button", { onClick: doLeave, className: "w-full p-3 bg-amber-600 text-white rounded-xl hover:bg-amber-700 transition-all font-bold", children: "Kirim Pengajuan" })
+                        ]})
+                    ]}),
+
+                    syncStatus && m.jsx("div", { className: "mb-4 text-xs text-orange-600 font-medium", children: syncStatus }),
+
+                    history.length > 0 && m.jsxs("div", { className: "text-left border-t pt-4", children: [
+                        m.jsx("p", { className: "text-xs font-bold text-gray-400 uppercase mb-3", children: "Riwayat Hari Ini" }),
+                        m.jsx("div", { className: "space-y-2", children: history.map((h, i) => 
+                            m.jsxs("div", { className: "flex flex-col gap-1 text-sm p-3 bg-gray-50 rounded-lg", children: [
+                                h.jamMasuk && m.jsxs("div", { className: "flex justify-between", children: [
+                                     m.jsx("span", { className: "text-green-600 font-medium", children: `Masuk (${h.statusMasuk || '-'})` }),
+                                     m.jsx("span", { className: "text-gray-500", children: h.jamMasuk })
+                                ]}),
+                                h.jamKeluar && m.jsxs("div", { className: "flex justify-between border-t pt-1 mt-1", children: [
+                                     m.jsx("span", { className: "text-red-600 font-medium", children: `Pulang (${h.statusKeluar || '-'})` }),
+                                     m.jsx("span", { className: "text-gray-500", children: h.jamKeluar })
+                                ]}),
+                                h.leaveType && m.jsxs("div", { className: "flex justify-between", children: [
+                                     m.jsx("span", { className: "text-amber-600 font-medium", children: `Izin: ${h.leaveType}` }),
+                                     m.jsx("span", { className: "text-gray-500", children: h.notes })
+                                ]})
+                            ]}, i)
+                        )})
+                    ]})
+                ]}),
+                m.jsxs("div", { className: "mt-6 flex gap-4 text-sm justify-center", children: [
+                    m.jsx("button", { onClick: () => setShowConfig(true), className: "text-blue-500 hover:text-blue-700 font-medium", children: "⚙️ Setup Server" }),
+                    m.jsx("button", { onClick: () => {
+                        localStorage.removeItem('session_user');
+                        window.location.reload();
+                    }, className: "text-gray-400 hover:text-gray-600", children: "Keluar" })
+                ]}),
+                m.jsx(ModalInput, {
+                    isOpen: showConfig,
+                    onClose: () => setShowConfig(false),
+                    onSave: saveEndpoint,
+                    initialValue: localStorage.getItem(ENDPOINT_KEY) || "",
+                    title: "Masukkan URL Web App Google Script"
+                })
+            ]});
+        }
+
+        // --- App Mounting ---
+        function App() {
+            const [user, setUser] = ot.useState(null);
+
+            ot.useEffect(() => {
+                const session = localStorage.getItem('session_user');
+                if (session) {
+                    try {
+                        setUser(JSON.parse(session));
+                    } catch(e) {
+                        localStorage.removeItem('session_user');
+                    }
+                }
+            }, []);
+
+            const handleLogin = (u, p) => {
+                const employees = DB.getEmployees();
+                const valid = employees.find(e => e.id == u && e.password == p);
+                
+                if (valid) {
+                    localStorage.setItem('session_user', JSON.stringify(valid));
+                    setUser(valid);
+                } else {
+                    if (u === 'admin' && p === 'admin') {
+                        const adminUser = { id: 'admin', name: 'Administrator', role: 'admin' };
+                        localStorage.setItem('session_user', JSON.stringify(adminUser));
+                        setUser(adminUser);
+                    } else {
+                         alert('Login gagal: ID atau Password salah');
+                    }
+                }
+            };
+
+            return user ? m.jsx(Y7, { user }) : m.jsxs(React.Fragment, { children: [
+                m.jsx(X7, { onLogin: handleLogin }),
+                m.jsx("div", { 
+                    className: "fixed bottom-2 right-3 text-[11px] text-gray-400 pointer-events-none select-none",
+                    children: "created by s4h33r_78"
+                })
+            ]});
+        }
+
+        const rootElement = document.getElementById('root');
+        if (rootElement) {
+            const root = ReactDOM.createRoot(rootElement);
+            root.render(React.createElement(App));
+        } else {
+            console.error("Root element not found!");
+        }
+    </script>
+</body>
+</html>
