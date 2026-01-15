@@ -540,7 +540,6 @@
             try {
                 const d = new Date(isoStr);
                 if (isNaN(d.getTime())) return isoStr;
-                d.setHours(d.getHours() + 12);
                 return d.toISOString().slice(0, 10);
             } catch (e) {
                 return isoStr;
@@ -592,12 +591,20 @@
             if (data.settings && typeof data.settings === "object") {
                 const local = getSystemSettings();
                 const remote = data.settings || {};
+                const remoteKehadiranRaw = remote.kehadiran || {};
+                const remoteKehadiran = { ...remoteKehadiranRaw };
+                if (remoteKehadiran.jamMasuk !== undefined && String(remoteKehadiran.jamMasuk).trim().length === 0) {
+                    delete remoteKehadiran.jamMasuk;
+                }
+                if (remoteKehadiran.jamPulang !== undefined && String(remoteKehadiran.jamPulang).trim().length === 0) {
+                    delete remoteKehadiran.jamPulang;
+                }
                 const mergedSettings = {
                     ...local,
                     ...remote,
                     kopSurat: { ...local.kopSurat, ...(remote.kopSurat || {}) },
                     kantor: { ...local.kantor, ...(remote.kantor || {}) },
-                    kehadiran: { ...local.kehadiran, ...(remote.kehadiran || {}) },
+                    kehadiran: { ...local.kehadiran, ...remoteKehadiran },
                     organisasi: { ...local.organisasi, ...(remote.organisasi || {}) }
                 };
                 saveSystemSettings(mergedSettings);
@@ -820,8 +827,10 @@
                         }
                     }
 
-                    const timestamp = new Date().toISOString();
+                    const now = new Date();
+                    const timestamp = now.toISOString();
                     const hhmm = formatTime(timestamp);
+                    const tanggalIso = timestamp.slice(0, 10);
                     
                     const statusTersedia = (settings.kehadiran && Array.isArray(settings.kehadiran.statusTersedia)) ? settings.kehadiran.statusTersedia : ["Hadir", "Tepat Waktu", "Terlambat", "Pulang Cepat", "Lembur", "Sakit", "Izin", "Cuti"];
                     const statusValue = type === 'check-out'
@@ -832,11 +841,13 @@
                     const isCheckOut = type === 'check-out';
 
                     const record = {
-                        recordId: `${user.id}_${timestamp.slice(0, 10)}`,
+                        recordId: `${user.id}_${tanggalIso}`,
                         employeeId: user.id,
                         employeeName: user.name,
                         workUnit: user.workUnit || 'Kantor Pusat',
                         timestamp: timestamp,
+                        dateOnly: tanggalIso,
+                        timeOnly: hhmm,
                         type: type,
                         
                         ...(isCheckIn ? {

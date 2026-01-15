@@ -120,8 +120,6 @@
             try {
                 const d = new Date(isoStr);
                 if (isNaN(d.getTime())) return isoStr;
-                // Add 12 hours to compensate for timezone shifts
-                d.setHours(d.getHours() + 12);
                 return d.toISOString().slice(0, 10);
             } catch (e) {
                 return isoStr;
@@ -406,12 +404,20 @@
             if (data.settings && typeof data.settings === "object") {
                 const local = getSystemSettings();
                 const remote = data.settings || {};
+                const remoteKehadiranRaw = remote.kehadiran || {};
+                const remoteKehadiran = { ...remoteKehadiranRaw };
+                if (remoteKehadiran.jamMasuk !== undefined && String(remoteKehadiran.jamMasuk).trim().length === 0) {
+                    delete remoteKehadiran.jamMasuk;
+                }
+                if (remoteKehadiran.jamPulang !== undefined && String(remoteKehadiran.jamPulang).trim().length === 0) {
+                    delete remoteKehadiran.jamPulang;
+                }
                 const mergedSettings = {
                     ...local,
                     ...remote,
                     kopSurat: { ...local.kopSurat, ...(remote.kopSurat || {}) },
                     kantor: { ...local.kantor, ...(remote.kantor || {}) },
-                    kehadiran: { ...local.kehadiran, ...(remote.kehadiran || {}) },
+                    kehadiran: { ...local.kehadiran, ...remoteKehadiran },
                     organisasi: { ...local.organisasi, ...(remote.organisasi || {}) },
                     penandatangan: { ...local.penandatangan, ...(remote.penandatangan || {}) },
                     denda: { ...local.denda, ...(remote.denda || {}) }
@@ -481,6 +487,10 @@
                     ? String(r.jamKeluar)
                     : (isCheckOut ? formatTime(r.timestamp) : "");
 
+                const ts = String(r.timestamp || "");
+                const tanggalIso = ts && ts.length >= 10 ? ts.slice(0, 10) : "";
+                const timeOnly = formatTime(ts);
+
                 const statusMasuk = r.statusMasuk || (isCheckIn ? String(r.status || "") : "");
                 const statusKeluar = r.statusKeluar || (isCheckOut ? String(r.status || "") : "");
 
@@ -492,7 +502,9 @@
                     employeeId: String(r.employeeId || ""),
                     employeeName: String(r.employeeName || ""),
                     workUnit: String(r.workUnit || ""),
-                    timestamp: String(r.timestamp || ""),
+                    timestamp: ts,
+                    dateOnly: tanggalIso,
+                    timeOnly,
                     jamMasuk,
                     typeMasuk,
                     statusMasuk,
