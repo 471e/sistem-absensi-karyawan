@@ -893,16 +893,20 @@
 
             const doLeave = async () => {
                 try {
-                    const timestamp = new Date().toISOString();
+                    const now = new Date();
+                    const timestamp = now.toISOString();
                     const hhmm = formatTime(timestamp);
+                    const tanggalIso = timestamp.slice(0, 10);
                     const allowed = new Set(["sakit", "izin", "cuti"]);
                     const status = allowed.has(String(leaveType || "").toLowerCase()) ? String(leaveType || "").toLowerCase() : "izin";
                     const record = {
-                        recordId: `${user.id}_${timestamp.slice(0, 10)}`,
+                        recordId: `${user.id}_${tanggalIso}`,
                         employeeId: user.id,
                         employeeName: user.name,
                         workUnit: user.workUnit || 'Kantor Pusat',
                         timestamp: timestamp,
+                        dateOnly: tanggalIso,
+                        timeOnly: hhmm,
                         type: "leave",
                         
                         jamMasuk: "-",

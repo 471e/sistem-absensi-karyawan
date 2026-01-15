@@ -244,7 +244,6 @@
             try {
                 const d = new Date(isoStr);
                 if (isNaN(d.getTime())) return isoStr;
-                d.setHours(d.getHours() + 12);
                 return d.toISOString().slice(0, 10);
             } catch (e) {
                 return isoStr;
