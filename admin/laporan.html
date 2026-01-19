@@ -242,11 +242,16 @@
         const fixSheetDate = (isoStr) => {
             if (!isoStr || isoStr === "-" || isoStr === "null") return "";
             try {
-                const d = new Date(isoStr);
-                if (isNaN(d.getTime())) return isoStr;
-                return d.toISOString().slice(0, 10);
+                const s = String(isoStr).trim();
+                if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+                const d = new Date(s);
+                if (isNaN(d.getTime())) return s;
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, "0");
+                const day = String(d.getDate()).padStart(2, "0");
+                return `${y}-${m}-${day}`;
             } catch (e) {
-                return isoStr;
+                return String(isoStr);
             }
         };
 
@@ -1006,17 +1011,29 @@
 
             const downloadTemplate = () => {
                 const wb = XLSX.utils.book_new();
-                const headers = ["ID Karyawan", "Nama Karyawan", "NIK", "NPP", "Unit Kerja", "Jabatan", "Golongan", "Pangkat", "Masa Kerja", "Password (Default: 123)"];
-                const example = ["AM2-999", "Contoh Nama", "3201010101010001", "NPP-999", "Kantor Cabang", "Staf", "III/a", "Penata Muda", "5 Tahun", "123"];
+                const headers = [
+                    "ID Karyawan", "Nama Karyawan", "Unit Kerja", "Jabatan", "Password (Default: 123)",
+                    "Jenis Kelamin (L/P)", "No. HP", "Email", "Alamat", "Tanggal Bergabung (YYYY-MM-DD)",
+                    "NIK", "NPP", "Golongan", "Pangkat", "Masa Kerja",
+                    "Tempat Lahir", "Tanggal Lahir (YYYY-MM-DD)", "Agama", "Status Perkawinan", "Status Karyawan",
+                    "Link Foto"
+                ];
+                const example = [
+                    "AM2-999", "Contoh Nama", "Kantor Cabang", "Staf", "123",
+                    "L", "081234567890", "contoh@email.com", "Jl. Merdeka No. 1", "2024-01-01",
+                    "3201010101010001", "NPP-999", "III/a", "Penata Muda", "5 Tahun",
+                    "Jakarta", "1990-01-01", "Islam", "Menikah", "Tetap",
+                    "https://drive.google.com/uc?export=view&id=FILE_ID"
+                ];
                 const ws = XLSX.utils.aoa_to_sheet([headers, example]);
                 XLSX.utils.book_append_sheet(wb, ws, "Template Karyawan");
-                XLSX.writeFile(wb, "Template_Import_Karyawan.xlsx");
+                XLSX.writeFile(wb, "Template_Import_Karyawan_Lengkap.xlsx");
             };
 
             const downloadAttendanceTemplate = () => {
                 const wb = XLSX.utils.book_new();
-                const headers = ["ID Karyawan", "Tanggal (YYYY-MM-DD)", "Jam (HH:MM)", "Tipe (check-in/check-out)", "Status", "Shift", "Lokasi", "Catatan"];
-                const example = ["AM2-001", "2024-01-01", "07:30", "check-in", "hadir", "Pagi", "Kantor", "Hadir Tepat Waktu"];
+                const headers = ["ID Karyawan", "Tanggal (YYYY-MM-DD)", "Jam (HH:MM)", "Tipe (check-in/check-out)", "Status", "Shift", "Lokasi", "Catatan", "Jam Masuk (HH:MM)", "Jam Keluar (HH:MM)"];
+                const example = ["AM2-001", "2024-01-01", "07:30", "check-in", "Hadir", "Pagi", "Kantor", "Tepat Waktu", "07:30", ""];
                 const ws = XLSX.utils.aoa_to_sheet([headers, example]);
                 XLSX.utils.book_append_sheet(wb, ws, "Template Absensi");
                 XLSX.writeFile(wb, "Template_Import_Absensi.xlsx");
@@ -1200,49 +1217,79 @@
                         const ws = wb.Sheets[wsname];
                         const data = XLSX.utils.sheet_to_json(ws);
 
-                        const newRecords = data.map(row => {
-                            // Map columns based on template headers
-                            // Headers: ["ID Karyawan", "Tanggal (YYYY-MM-DD)", "Jam (HH:MM)", "Tipe (check-in/check-out)", "Status", "Shift", "Lokasi", "Catatan"]
-                            const dateStr = row["Tanggal (YYYY-MM-DD)"];
-                            const timeStr = row["Jam (HH:MM)"];
-                            const type = row["Tipe (check-in/check-out)"];
-                            const empId = row["ID Karyawan"];
-                            const jamMasuk = row["Jam Masuk"] || row["Jam Masuk (HH:MM)"] || "";
-                            const jamKeluar = row["Jam Keluar"] || row["Jam Keluar (HH:MM)"] || "";
-                            
-                            if (!dateStr || !timeStr || !type || !empId) return null;
+                        const employees = DB.getEmployees();
+                        const empMap = employees.reduce((acc, emp) => {
+                            acc[String(emp.id)] = emp;
+                            return acc;
+                        }, {});
 
-                            // Construct timestamp
-                            // Handle Excel date number if necessary, but assuming text YYYY-MM-DD for now as per template
-                            // If user types raw, SheetJS might parse as date.
+                        const padTime = (timeStr) => {
+                            if (!timeStr) return "";
+                            const clean = String(timeStr).trim();
+                            const parts = clean.replace(".", ":").split(":");
+                            if (parts.length >= 2) {
+                                const h = parts[0].padStart(2, "0");
+                                const m = parts[1].padStart(2, "0");
+                                return `${h}:${m}`;
+                            }
+                            return clean;
+                        };
+
+                        const newRecords = data.map(row => {
+                            const dateStr = row["Tanggal (YYYY-MM-DD)"] || row["Tanggal"] || row["Tanggal (YYYY/MM/DD)"];
+                            const timeRaw = row["Jam (HH:MM)"] || row["Jam (HH:mm)"] || row["Jam"] || row["Jam (HH:mm:ss)"];
+                            const rawType = row["Tipe (check-in/check-out)"] || row["Tipe (Masuk/Pulang)"] || row["Tipe"] || row["Tipe (Masuk / Pulang)"];
+                            const empId = row["ID Karyawan"];
+                            const jamMasukRaw = row["Jam Masuk"] || row["Jam Masuk (HH:MM)"] || "";
+                            const jamKeluarRaw = row["Jam Keluar"] || row["Jam Keluar (HH:MM)"] || "";
                             
+                            if (!dateStr || !timeRaw || !rawType || !empId) return null;
+
+                            const timeStr = padTime(timeRaw);
+                            const jamMasuk = padTime(jamMasukRaw);
+                            const jamKeluar = padTime(jamKeluarRaw);
+
+                            const typeLower = String(rawType || "").toLowerCase().trim();
+                            let type = typeLower;
+                            if (typeLower === "masuk") type = "check-in";
+                            else if (typeLower === "pulang") type = "check-out";
+
                             let timestamp = "";
                             if (dateStr.toString().includes("-") && timeStr.toString().includes(":")) {
                                 timestamp = `${dateStr}T${timeStr}:00`;
                             } else {
-                                // Fallback for simple concats or Excel serials if needed
-                                // For now strict to template format
                                 timestamp = `${dateStr}T${timeStr}`;
                             }
-
-                            // Basic cleanup
                             timestamp = timestamp.replace(" ", "T");
                             
-                            return {
+                            const emp = empMap[String(empId)];
+
+                            const baseRecord = {
                                 recordId: `${empId}_${timestamp}_${type}`,
                                 employeeId: empId,
-                                employeeName: "",
-                                workUnit: "",
+                                employeeName: emp ? emp.name : "",
+                                workUnit: emp ? emp.workUnit : "",
                                 type: type,
-                                status: row["Status"] || "hadir",
+                                status: row["Status"] || "Hadir",
                                 shift: row["Shift"] || "",
                                 workLocation: row["Lokasi"] || "",
-                                notes: row["Catatan"] || "",
-                                jamMasuk: jamMasuk || (type === "check-in" ? String(timeStr || "") : ""),
-                                jamKeluar: jamKeluar || (type === "check-out" ? String(timeStr || "") : ""),
+                                notes: row["Catatan"] || row["Keterangan"] || "",
                                 timestamp: timestamp,
                                 method: 'Import Excel'
                             };
+
+                            if (type === "check-in") {
+                                baseRecord.jamMasuk = jamMasuk || timeStr;
+                                baseRecord.jamKeluar = jamKeluar || "";
+                            } else if (type === "check-out") {
+                                baseRecord.jamMasuk = jamMasuk || "";
+                                baseRecord.jamKeluar = jamKeluar || timeStr;
+                            } else {
+                                baseRecord.jamMasuk = jamMasuk || "";
+                                baseRecord.jamKeluar = jamKeluar || "";
+                            }
+
+                            return baseRecord;
                         }).filter(r => r !== null);
 
                         const current = DB.getAttendance();
