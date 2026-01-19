@@ -306,7 +306,7 @@ function exportJSON(name) {
 function ensureAllSheets(mode) {
   var m = String(mode||'safe');
   var employeesHeaders = ["id","name","workUnit","role","password","gender","phone","email","address","joinDate","nik","npp","golongan","pangkat","masaKerja","birthPlace","birthDate","religion","maritalStatus","status","photoUrl"];
-  var attendanceHeaders = ["recordId","employeeId","employeeName","workUnit","timestamp","jamMasuk","typeMasuk","statusMasuk","jamKeluar","typeKeluar","statusKeluar","shift","workLocation","notes","method","leaveType","latitude","longitude"];
+  var attendanceHeaders = ["recordId","employeeId","employeeName","workUnit","timestamp","jamMasuk","typeMasuk","statusMasuk","jamKeluar","typeKeluar","statusKeluar","shift","workLocation","notes","method","leaveType","latitude","longitude","Hitung_Keterlambatan","Hitung_PulangCepat"];
   var settingsHeaders = ["key","value"];
   ensureSheet('Employees', employeesHeaders, m==='reset' ? 'replace' : 'safe');
   ensureSheet('Attendance', attendanceHeaders, m==='reset' ? 'replace' : 'safe');
