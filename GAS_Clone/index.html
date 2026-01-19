@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Absensi Web App (Apps Script)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: Inter, ui-sans-serif, system-ui; background:#f6f7fb; margin:0 auto; padding:24px; color:#1f2937; max-width: 1200px; }
+    .card { background:#fff; border-radius:16px; box-shadow:0 10px 30px rgba(16,24,40,0.08); padding:24px; margin:12px 0; }
+    .btn { display:inline-flex; align-items:center; gap:8px; background:#2563eb; color:#fff; padding:10px 14px; border-radius:10px; text-decoration:none; border:none; cursor:pointer; }
+    .btn.secondary { background:#0ea5e9; }
+    .btn.gray { background:#6b7280; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .input { padding:10px 12px; border:1px solid #e5e7eb; border-radius:10px; width:100%; }
+    h1 { font-size:22px; margin:0 0 12px; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:8px 10px; text-align:left; font-size:14px; }
+    th { background:#f9fafb; font-weight:600; }
+    .muted { color:#6b7280; font-size:13px; }
+      <button class="btn" onclick="showSection('pengaturan')">Pengaturan</button>
+    </div>
+  </div>
+
+  <section id="kamera" style="display:block;">
+  <div class="card">
+    <h1>Absen via Kamera</h1>
+    <div class="row">
+      <select id="empSelect" class="input" style="max-width:240px;"></select>
+      <select id="typeSelect" class="input" style="max-width:160px;">
+        <option value="check-in">Masuk</option>
+        <option value="check-out">Pulang</option>
+      </select>
+      <input id="statusInput" class="input" placeholder="Status (mis: Hadir)" style="max-width:200px;">
+      <input id="notesInput" class="input" placeholder="Catatan" style="flex:1;">
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <video id="video" width="320" height="240" autoplay playsinline style="border-radius:12px; background:#0f172a;"></video>
+      <canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <button class="btn" onclick="startCamera()">Mulai Kamera</button>
+      <button class="btn secondary" onclick="captureAndSend()">Ambil & Kirim</button>
+    </div>
+    <p id="camResult" class="muted"></p>
+  </div>
+  </section>
+
+  <section id="sync" style="display:none;">
+  <div class="card">
+    <h1>Sinkronisasi Manual</h1>
+    <div class="row">
+      <textarea id="payload" class="input" rows="6" placeholder='{"action":"sync_attendance","mode":"replace","payload":[{"recordId":"AM2-001_2026-01-05T08:00:00_check-in","employeeId":"AM2-001","employeeName":"Nama","workUnit":"Unit","timestamp":"2026-01-05T08:00:00","jamMasuk":"08:00","typeMasuk":"Masuk","statusMasuk":"Hadir"}]}'></textarea>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <button class="btn" onclick="sendPayload()">Kirim Payload</button>
+      <button class="btn gray" onclick="fillExample()">Contoh Attendance</button>
+      <select id="mode" class="input" style="max-width:160px;">
+        <option value="replace">Mode: Replace</option>
+        <option value="append">Mode: Append</option>
+        <option value="upsert">Mode: Upsert</option>
+      </select>
+    </div>
+    <p id="result" class="muted"></p>
+  </div>
+  </section>
+
+  <section id="data" style="display:none;">
+  <div class="card">
+    <h1>Data Terakhir</h1>
+    <div class="row">
+      <button class="btn secondary" onclick="google.script.run.withSuccessHandler(renderEmployees).getSheetRows('Employees')">Lihat Employees</button>
+      <button class="btn secondary" onclick="google.script.run.withSuccessHandler(renderAttendance).getSheetRows('Attendance')">Lihat Attendance</button>
+      <button class="btn secondary" onclick="google.script.run.withSuccessHandler(renderSettings).getSheetRows('Settings')">Lihat Settings</button>
+      <button class="btn" onclick="exportSheet('Employees','csv')">Export Employees CSV</button>
+      <button class="btn" onclick="exportSheet('Attendance','csv')">Export Attendance CSV</button>
+      <button class="btn gray" onclick="exportSheet('Employees','json')">Export Employees JSON</button>
+      <button class="btn gray" onclick="exportSheet('Attendance','json')">Export Attendance JSON</button>
+    </div>
+    <div id="table"></div>
+    <p id="exportResult" class="muted"></p>
+  </div>
+  </section>
+  
+  <section id="admin" style="display:none;">
+  <div class="card">
+    <h1>Admin Karyawan</h1>
+    <div class="row">
+      <input id="e_id" class="input" placeholder="ID Karyawan (unik)" style="max-width:180px;">
+      <input id="e_name" class="input" placeholder="Nama" style="max-width:220px;">
+      <input id="e_unit" class="input" placeholder="Unit Kerja" style="max-width:200px;">
+      <input id="e_role" class="input" placeholder="Jabatan" style="max-width:200px;">
+      <input id="e_gender" class="input" placeholder="L/P" style="max-width:100px;">
+      <input id="e_status" class="input" placeholder="Status (Tetap/Kontrak)" style="max-width:200px;">
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <button class="btn" onclick="upsertEmployee()">Simpan/Update</button>
+      <button class="btn gray" onclick="deleteEmployee()">Hapus</button>
+      <button class="btn secondary" onclick="fillFromSelection()">Isi dari pilihan kamera</button>
+    </div>
+    <div class="row" style="margin-top:12px; border-top:1px solid #e5e7eb; padding-top:12px;">
+      <button class="btn secondary" onclick="downloadTemplate()">Download Template CSV</button>
+      <div style="display:flex; align-items:center;">
+        <span class="muted" style="margin-right:8px;">Import CSV:</span>
+        <input type="file" accept=".csv" onchange="importCSV(this)">
+      </div>
+    </div>
+    <p id="adminResult" class="muted"></p>
+  </div>
+  </section>
+  
+  <section id="laporan" style="display:none;">
+  <div class="card">
+    <div class="print-header">
+      <h2>Laporan Absensi</h2>
+      <p id="printPeriod"></p>
+    </div>
+    <h1>Laporan</h1>
+    <div class="row">
+      <input id="startDate" class="input" type="date" style="max-width:180px;">
+      <input id="endDate" class="input" type="date" style="max-width:180px;">
+      <select id="unitFilter" class="input" style="max-width:220px;">
+        <option value="">Semua Unit</option>
+      </select>
+      <select id="empFilter" class="input" style="max-width:240px;">
+        <option value="">Semua Karyawan</option>
+      </select>
+      <button class="btn" onclick="loadReport()">Tampilkan</button>
+      <button class="btn gray" onclick="exportSummary()">Export Ringkasan CSV</button>
+      <button class="btn gray" onclick="exportDetail()">Export Detail CSV</button>
+      <button class="btn secondary" onclick="printReport()">Cetak / PDF</button>
+    </div>
+    <div id="report"></div>
+    <div id="reportSummary" style="margin-top:12px;"></div>
+    <p id="exportSummaryResult" class="muted"></p>
+    <p id="exportDetailResult" class="muted"></p>
+  </div>
+  </section>
+
+  <section id="pengaturan" style="display:none;">
+  <div class="card">
+    <h1>Pengaturan</h1>
+    <div class="row">
+      <label style="display:flex;flex-direction:column;max-width:160px;">
+        <span class="muted">Jam Masuk</span>
+        <input id="jamMasukInput" class="input" type="time" value="08:00">
+      </label>
+      <label style="display:flex;flex-direction:column;max-width:160px;">
+        <span class="muted">Jam Pulang</span>
+        <input id="jamPulangInput" class="input" type="time" value="17:00">
+      </label>
+      <label style="display:flex;flex-direction:column;max-width:200px;">
+        <span class="muted">Toleransi Terlambat (menit)</span>
+        <input id="tolLateInput" class="input" type="number" min="0" value="0">
+      </label>
+      <label style="display:flex;flex-direction:column;max-width:220px;">
+        <span class="muted">Toleransi Pulang Cepat (menit)</span>
+        <input id="tolEarlyInput" class="input" type="number" min="0" value="0">
+      </label>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <button class="btn" onclick="saveSettings()">Simpan Pengaturan</button>
+      <button class="btn gray" onclick="resetSheets()">Reset Sheets</button>
+      <button class="btn secondary" onclick="createFolders()">Buat Folder Drive</button>
+    </div>
+    <p id="settingsResult" class="muted"></p>
+  </div>
+  </section>
+
+  <script>
+    function testPing() {
+      document.getElementById('result').textContent = 'OK: Web App aktif';
+    }
+    function openGuide() {
+      alert('Arahkan aplikasi lokal untuk POST ke URL Web App ini dengan body JSON: { action, payload }. Mode no-cors didukung.');
+    }
+    function handleFileUpload(input) {
+      var file = input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        document.getElementById('payload').value = e.target.result;
+        document.getElementById('result').textContent = 'File JSON dimuat. Silakan periksa dan klik Kirim Payload.';
+        input.value = ''; // Reset input agar bisa upload file yang sama ulang jika perlu
+      };
+      reader.readAsText(file);
+    }
+    function sendPayload() {
+      try {
+        var text = document.getElementById('payload').value.trim();
+        var obj = JSON.parse(text);
+        obj.mode = document.getElementById('mode').value;
+        google.script.run.withSuccessHandler(function(){ document.getElementById('result').textContent = 'Kirim berhasil'; }).doRelay(obj);
+      } catch (e) {
+        document.getElementById('result').textContent = 'Payload tidak valid: ' + e.message;
+      }
+    }
+    function fillExample() {
+      var ex = {"action":"sync_attendance","payload":[{"recordId":"AM2-001_2026-01-05T08:00:00_check-in","employeeId":"AM2-001","employeeName":"Contoh","workUnit":"Kantor Cabang","timestamp":"2026-01-05T08:00:00","jamMasuk":"08:00","typeMasuk":"Masuk","statusMasuk":"Hadir"}]};
+      document.getElementById('payload').value = JSON.stringify(ex, null, 2);
+    }
+    function renderEmployees(rows) {
+      renderTable(['id','name','workUnit','role','gender','joinDate','status'], rows);
+    }
+    function renderAttendance(rows) {
+      renderTable(['recordId','employeeId','employeeName','workUnit','timestamp','jamMasuk','typeMasuk','jamKeluar','typeKeluar'], rows);
+    }
+    function renderSettings(rows) {
+      renderTable(['key','value'], rows);
+    }
+    function renderTable(cols, rows) {
+      var el = document.getElementById('table');
+      var html = '<table><thead><tr>';
+      cols.forEach(function(c){ html += '<th>'+c+'</th>'; });
+      html += '</tr></thead><tbody>';
+      (rows||[]).forEach(function(r){
+        html += '<tr>';
+        cols.forEach(function(c){ html += '<td>'+ (r[c]||'') +'</td>'; });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+    }
+    function showSection(id) {
+      ['kamera','sync','data','admin','laporan','pengaturan'].forEach(function(s){
+        var el = document.getElementById(s);
+        if (el) el.style.display = (s===id ? 'block' : 'none');
+      });
+      if (id === 'pengaturan') loadSettings();
+    }
+    function exportSheet(name, t) {
+      var fn = t === 'csv' ? 'exportCSV' : 'exportJSON';
+      google.script.run.withSuccessHandler(function(res){
+        document.getElementById('exportResult').textContent = (res && res.ok) ? ('Export: '+res.url) : 'Gagal export';
+      })[fn](name);
+    }
+    function startCamera() {
+      var v = document.getElementById('video');
+      navigator.mediaDevices.getUserMedia({ video: true, audio: false }).then(function(stream){
+        v.srcObject = stream;
+      }).catch(function(){
+        document.getElementById('camResult').textContent = 'Kamera tidak tersedia';
+      });
+    }
+    function captureAndSend() {
+      var v = document.getElementById('video');
+      var c = document.getElementById('canvas');
+      var empId = document.getElementById('empSelect').value;
+      var type = document.getElementById('typeSelect').value;
+      var status = document.getElementById('statusInput').value || 'Hadir';
+      var notes = document.getElementById('notesInput').value || '';
+      if (!empId) { document.getElementById('camResult').textContent = 'Pilih karyawan'; return; }
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      var dataUrl = c.toDataURL('image/jpeg', 0.8);
+      google.script.run.withSuccessHandler(function(res){
+        document.getElementById('camResult').textContent = 'Berhasil: ' + (res && res.recordId);
+      }).recordAttendanceWithPhoto({ employeeId: empId, type: type, status: status, notes: notes, imageDataUrl: dataUrl });
+    }
+    function loadEmployeesForCamera() {
+      google.script.run.withSuccessHandler(function(rows){
+        var sel = document.getElementById('empSelect');
+        sel.innerHTML = '';
+        if (!rows || rows.length === 0) {
+          var opt = document.createElement('option');
+          opt.value = "";
+          opt.textContent = "Belum ada data karyawan";
+          sel.appendChild(opt);
+          return;
+        }
+        (rows||[]).forEach(function(r){
+          var opt = document.createElement('option');
+          opt.value = r.id || r.employeeId || '';
+          opt.textContent = (r.id||'') + ' - ' + (r.name||r.employeeName||'');
+          sel.appendChild(opt);
+        });
+      }).withFailureHandler(function(err){
+         console.error(err);
+         var sel = document.getElementById('empSelect');
+         sel.innerHTML = '<option>Error memuat data</option>';
+      }).listEmployees();
+    }
+    function loadSettings() {
+      google.script.run.withSuccessHandler(function(obj){
+        var jm = (obj && obj.jamMasuk) ? String(obj.jamMasuk) : '08:00';
+        var jp = (obj && obj.jamPulang) ? String(obj.jamPulang) : '17:00';
+        var tl = (obj && obj.toleransiTerlambatMenit != null) ? Number(obj.toleransiTerlambatMenit) : 0;
+        var te = (obj && obj.toleransiPulangCepatMenit != null) ? Number(obj.toleransiPulangCepatMenit) : 0;
+        document.getElementById('jamMasukInput').value = jm;
+        document.getElementById('jamPulangInput').value = jp;
+        document.getElementById('tolLateInput').value = tl;
+        document.getElementById('tolEarlyInput').value = te;
+        document.getElementById('settingsResult').textContent = 'Pengaturan dimuat';
+      }).getSettings();
+    }
+    function saveSettings() {
+      var jm = document.getElementById('jamMasukInput').value || '08:00';
+      var jp = document.getElementById('jamPulangInput').value || '17:00';
+      var tl = Number(document.getElementById('tolLateInput').value || 0);
+      var te = Number(document.getElementById('tolEarlyInput').value || 0);
+      google.script.run.withSuccessHandler(function(){
+        document.getElementById('settingsResult').textContent = 'Pengaturan disimpan';
+      }).writeSettings({ jamMasuk: jm, jamPulang: jp, toleransiTerlambatMenit: tl, toleransiPulangCepatMenit: te });
+    }
+    function resetSheets() {
+      google.script.run.withSuccessHandler(function(){
+        document.getElementById('settingsResult').textContent = 'Sheets di-reset';
+      }).resetSheets();
+    }
+    function createFolders() {
+      google.script.run.withSuccessHandler(function(){
+        document.getElementById('settingsResult').textContent = 'Folder dibuat';
+      }).setupFolders();
+    }
+    function loadFilters() {
+      google.script.run.withSuccessHandler(function(units){
+        var sel = document.getElementById('unitFilter');
+        sel.innerHTML = '<option value=\"\">Semua Unit</option>';
+        (units||[]).forEach(function(u){
+          var opt = document.createElement('option');
+          opt.value = u || '';
+          opt.textContent = u || '';
+          sel.appendChild(opt);
+        });
+      }).listUnits();
+      google.script.run.withSuccessHandler(function(rows){
+        var sel = document.getElementById('empFilter');
+        sel.innerHTML = '<option value=\"\">Semua Karyawan</option>';
+        (rows||[]).forEach(function(r){
+          var opt = document.createElement('option');
+          opt.value = r.id || '';
+          opt.textContent = (r.id||'') + ' - ' + (r.name||'');
+          sel.appendChild(opt);
+        });
+      }).listEmployees();
+    }
+    function loadReport() {
+      var s = document.getElementById('startDate').value;
+      var e = document.getElementById('endDate').value;
+      var unit = document.getElementById('unitFilter').value;
+      var empId = document.getElementById('empFilter').value;
+      google.script.run.withSuccessHandler(function(rows){
+        var el = document.getElementById('report');
+        var html = '<table><thead><tr><th>employeeId</th><th>employeeName</th><th>timestamp</th><th>jamMasuk</th><th>terlambatMenit</th><th>jamKeluar</th><th>pulangCepatMenit</th></tr></thead><tbody>';
+        (rows||[]).forEach(function(r){
+          html += '<tr><td>'+ (r.employeeId||'') +'</td><td>'+ (r.employeeName||'') +'</td><td>'+ (r.timestamp||'') +'</td><td>'+ (r.jamMasuk||'') +'</td><td>'+ (r.terlambatMenit||0) +'</td><td>'+ (r.jamKeluar||'') +'</td><td>'+ (r.pulangCepatMenit||0) +'</td></tr>';
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+      }).computeLateEarlyReport(s, e, unit, empId);
+      google.script.run.withSuccessHandler(function(rows){
+        var el = document.getElementById('reportSummary');
+        var html = '<table><thead><tr><th>employeeId</th><th>employeeName</th><th>totalTerlambatMenit</th><th>totalPulangCepatMenit</th><th>totalCheckIn</th><th>totalCheckOut</th></tr></thead><tbody>';
+        (rows||[]).forEach(function(r){
+          html += '<tr><td>'+ (r.employeeId||'') +'</td><td>'+ (r.employeeName||'') +'</td><td>'+ (r.totalTerlambatMenit||0) +'</td><td>'+ (r.totalPulangCepatMenit||0) +'</td><td>'+ (r.totalCheckIn||0) +'</td><td>'+ (r.totalCheckOut||0) +'</td></tr>';
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+      }).computeLateEarlySummary(s, e, unit, empId);
+    }
+    function exportSummary() {
+      var s = document.getElementById('startDate').value;
+      var e = document.getElementById('endDate').value;
+      google.script.run.withSuccessHandler(function(res){
+        document.getElementById('exportSummaryResult').textContent = (res && res.ok) ? ('Export: '+res.url) : 'Gagal export';
+      }).exportLateEarlySummary(s, e);
+    }
+    function exportDetail() {
+      var s = document.getElementById('startDate').value;
+      var e = document.getElementById('endDate').value;
+      var unit = document.getElementById('unitFilter').value;
+      var empId = document.getElementById('empFilter').value;
+      google.script.run.withSuccessHandler(function(res){
+        document.getElementById('exportDetailResult').textContent = (res && res.ok) ? ('Export: '+res.url) : 'Gagal export';
+      }).exportLateEarlyDetailCSV(s, e, unit, empId);
+    }
+    function upsertEmployee() {
+      var emp = {
+        id: document.getElementById('e_id').value.trim(),
+        name: document.getElementById('e_name').value.trim(),
+        workUnit: document.getElementById('e_unit').value.trim(),
+        role: document.getElementById('e_role').value.trim(),
+        gender: document.getElementById('e_gender').value.trim(),
+        status: document.getElementById('e_status').value.trim()
+      };
+      if (!emp.id) { document.getElementById('adminResult').textContent = 'ID wajib diisi'; return; }
+      google.script.run.withSuccessHandler(function(res){
+        document.getElementById('adminResult').textContent = res && res.updated ? 'Diperbarui' : 'Ditambahkan';
+        loadEmployeesForCamera();
+      }).upsertEmployee(emp);
+    }
+
+    function downloadTemplate() {
+      var headers = ["id","name","workUnit","role","gender","status","phone","email","joinDate","nik"];
+      var csv = headers.join(',') + "\n" + "KARYAWAN-001,Nama Contoh,Divisi IT,Staff,L,Tetap,08123456789,email@contoh.com,2024-01-01,1234567890";
+      var blob = new Blob([csv], { type: 'text/csv' });
+      var url = window.URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'template_karyawan.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    function importCSV(input) {
+      var file = input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var text = e.target.result;
+        var lines = text.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
+        if (lines.length < 2) { alert('File kosong atau format salah'); return; }
+        
+        var headers = lines[0].split(',').map(function(h){ return h.trim().replace(/^"|"$/g, ''); });
+        var data = [];
+        
+        for (var i=1; i<lines.length; i++) {
+          var line = lines[i];
+          // Simple split by comma, handling quotes roughly
+          var row = [];
+          var inQuote = false;
+          var token = '';
+          for (var c=0; c<line.length; c++) {
+             var char = line[c];
+             if (char === '"') { inQuote = !inQuote; }
+             else if (char === ',' && !inQuote) { row.push(token); token = ''; }
+             else { token += char; }
+          }
+          row.push(token);
+          
+          row = row.map(function(v){ return v.trim().replace(/^"|"$/g, ''); });
+          
+          var obj = {};
+          headers.forEach(function(h, idx){
+            obj[h] = row[idx] || '';
+          });
+          if (obj.id) data.push(obj);
+        }
+        
+        if (data.length === 0) { alert('Tidak ada data valid ditemukan'); return; }
+        
+        if (!confirm('Akan mengimpor ' + data.length + ' data pegawai. Lanjutkan?')) return;
+        
+        document.getElementById('adminResult').textContent = 'Mengimpor...';
+            google.script.run.withSuccessHandler(function(res){
+              document.getElementById('adminResult').textContent = 'Import Selesai: ' + (res.inserted||0) + ' baru, ' + (res.updated||0) + ' diupdate.';
+              loadEmployeesForCamera();
+              input.value = '';
+            }).withFailureHandler(function(err){
+              document.getElementById('adminResult').textContent = 'Gagal Import: ' + err.message;
+              input.value = '';
+            }).bulkUpsertEmployees(data);
+      };
+      reader.readAsText(file);
+    }
+    function printReport() {
+      var s = document.getElementById('startDate').value;
+      var e = document.getElementById('endDate').value;
+      var info = 'Periode: ' + (s||'-') + ' s/d ' + (e||'-');
+      document.getElementById('printPeriod').textContent = info;
+      
+      // Handle Page Size dynamically
+      var sizeElement = document.getElementById('pageSize');
+      var size = sizeElement ? sizeElement.value : 'A4';
+      var css = '@page { size: ' + size + '; margin: 10mm; }';
+      var style = document.getElementById('print-style-dynamic');
+      if (!style) {
+        style = document.createElement('style');
+        style.id = 'print-style-dynamic';
+        document.head.appendChild(style);
+      }
+      style.innerHTML = css;
+
+      window.print();
+    }
+    function deleteEmployee() {
+      var id = document.getElementById('e_id').value.trim();
+      if (!id) { document.getElementById('adminResult').textContent = 'Isi ID untuk hapus'; return; }
+      google.script.run.withSuccessHandler(function(res){
+        document.getElementById('adminResult').textContent = (res && res.deleted) ? 'Dihapus' : 'Tidak ditemukan';
+        loadEmployeesForCamera();
+      }).deleteEmployee(id);
+    }
+    function fillFromSelection() {
+      var sel = document.getElementById('empSelect');
+      var val = sel.value || '';
+      var txt = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : '';
+      var name = txt.split(' - ')[1] || '';
+      document.getElementById('e_id').value = val;
+      document.getElementById('e_name').value = name;
+    }
+    
+    function downloadTemplate() {
+      var headers = ["id","name","workUnit","role","gender","status","phone","email","joinDate","nik"];
+      var csv = headers.join(',') + "\n" + "KARYAWAN-001,Nama Contoh,Divisi IT,Staff,L,Tetap,08123456789,email@contoh.com,2024-01-01,1234567890";
+      var blob = new Blob([csv], { type: 'text/csv' });
+      var url = window.URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'template_karyawan.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    function importCSV() {
+      var fileInput = document.getElementById('csvImportFile');
+      var file = fileInput.files[0];
+      if (!file) { alert('Pilih file CSV terlebih dahulu'); return; }
+      
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var text = e.target.result;
+        var lines = text.split('\n');
+        if (lines.length < 2) { alert('Format CSV salah atau kosong'); return; }
+        
+        var headers = lines[0].trim().split(',').map(function(h){ return h.trim().replace(/^"|"$/g, ''); });
+        var payload = [];
+        
+        for (var i=1; i<lines.length; i++) {
+          var line = lines[i].trim();
+          if (!line) continue;
+          
+          // Simple CSV regex to handle commas inside quotes
+          var matches = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g); 
+          // Fallback if simple split is enough (assuming no commas in data for now or simple handling)
+          var cols = line.split(','); 
+          
+          // Map columns to object
+          var obj = {};
+          for (var j=0; j<headers.length; j++) {
+            var val = cols[j] || '';
+            val = val.replace(/^"|"$/g, '').trim();
+            obj[headers[j]] = val;
+          }
+          if (obj.id) payload.push(obj);
+        }
+        
+        if (payload.length === 0) { alert('Tidak ada data valid ditemukan'); return; }
+        
+        if (!confirm('Akan mengimport ' + payload.length + ' data karyawan. Lanjutkan? (Mode: Tambah/Append)')) return;
+        
+        document.getElementById('adminResult').textContent = 'Mengirim data...';
+        google.script.run.withSuccessHandler(function(res){
+          document.getElementById('adminResult').textContent = 'Import berhasil!';
+          fileInput.value = '';
+          loadEmployeesForCamera();
+        }).writeEmployees(payload, 'append');
+      };
+      reader.readAsText(file);
+    }
+
+    document.addEventListener('DOMContentLoaded', function(){
+      loadEmployeesForCamera();
+      loadFilters();
+    });
+  </script>
+  <?!= include('ServerBridge'); ?>
+</body>
+</html>
