@@ -313,11 +313,62 @@ function ensureAllSheets(mode) {
   ensureSheet('Settings', settingsHeaders, m==='reset' ? 'replace' : 'safe');
 }
 
+/**
+ * --- APPSHEET INTEGRATION HELPER ---
+ * Jalankan fungsi ini sekali untuk menyiapkan Sheet agar "Ramah AppSheet"
+ * dan memiliki logika otomatis (ArrayFormula) yang sinkron untuk kedua aplikasi.
+ */
+function setupAppSheetCompatibility() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 1. Setup Sheet Absensi dengan Rumus Otomatis
+  var shAtt = ss.getSheetByName('Attendance');
+  if (shAtt) {
+    // Pastikan header ada
+    var headers = ["recordId","employeeId","employeeName","workUnit","timestamp","jamMasuk","typeMasuk","statusMasuk","jamKeluar","typeKeluar","statusKeluar","shift","workLocation","notes","method","leaveType","latitude","longitude", "Hitung_Keterlambatan", "Hitung_PulangCepat"];
+    
+    // Cek apakah kolom rumus sudah ada, jika belum tambahkan
+    var currentHeaders = shAtt.getRange(1, 1, 1, shAtt.getLastColumn()).getValues()[0];
+    if (currentHeaders.indexOf("Hitung_Keterlambatan") === -1) {
+      shAtt.getRange(1, currentHeaders.length + 1).setValue("Hitung_Keterlambatan");
+      shAtt.getRange(1, currentHeaders.length + 2).setValue("Hitung_PulangCepat");
+    }
+
+    // INJEKSI ARRAY FORMULA DI BARIS 2
+    // Rumus ini akan otomatis menghitung keterlambatan untuk SEMUA baris, baik input dari Web App maupun AppSheet
+    // Asumsi: Kolom F adalah Jam Masuk (index 6), Kolom I adalah Jam Keluar (index 9)
+    // Format Jam di Sheet harus HH:mm
+    
+    // Formula Keterlambatan (Contoh sederhana: Lewat 08:00 dihitung terlambat)
+    // Logika: Jika JamMasuk > 08:00, maka (JamMasuk - 08:00). Jika tidak, 0.
+    var colJamMasukLetter = "F"; 
+    var formulaLate = '={"Hitung_Keterlambatan";ARRAYFORMULA(IF(LEN(' + colJamMasukLetter + '2:' + colJamMasukLetter + '), IF(' + colJamMasukLetter + '2:' + colJamMasukLetter + ' > TIME(8,0,0), TEXT(' + colJamMasukLetter + '2:' + colJamMasukLetter + ' - TIME(8,0,0), "HH:mm:ss"), "-"), ""))}';
+    
+    // Formula Pulang Cepat
+    var colJamKeluarLetter = "I";
+    var formulaEarly = '={"Hitung_PulangCepat";ARRAYFORMULA(IF(LEN(' + colJamKeluarLetter + '2:' + colJamKeluarLetter + '), IF(' + colJamKeluarLetter + '2:' + colJamKeluarLetter + ' < TIME(17,0,0), TEXT(TIME(17,0,0) - ' + colJamKeluarLetter + '2:' + colJamKeluarLetter + ', "HH:mm:ss"), "-"), ""))}';
+
+    // Set Formula di Header Row (Teknik ArrayFormula Header) agar tidak terhapus saat insert row
+    // Atau kita taruh di Baris 2 jika user preferensi manual.
+    // Di sini kita gunakan teknik "Header Injection" agar lebih aman.
+    
+    // Namun untuk keamanan AppSheet, lebih baik formula ditaruh di Row 2, dan AppSheet di-setting "Read Only" untuk kolom tersebut.
+    var lastCol = shAtt.getLastColumn();
+    // Cari index kolom
+    var idxLate = getHeaderIndex(shAtt, "Hitung_Keterlambatan");
+    var idxEarly = getHeaderIndex(shAtt, "Hitung_PulangCepat");
+    
+    if (idxLate > 0) shAtt.getRange(1, idxLate).setFormula(formulaLate);
+    if (idxEarly > 0) shAtt.getRange(1, idxEarly).setFormula(formulaEarly);
+  }
+}
+
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Absensi Setup')
     .addItem('Initialize Sheets', 'ensureAllSheets')
     .addItem('Create Folders', 'setupFolders')
+    .addItem('Setup AppSheet Formulas', 'setupAppSheetCompatibility')
     .addToUi();
 }
 
