@@ -160,6 +160,10 @@
         };
 
         const ENDPOINT_KEY = "absensi_endpoint_v1";
+        // Auto-set default endpoint if not present
+        if (!localStorage.getItem(ENDPOINT_KEY)) {
+            localStorage.setItem(ENDPOINT_KEY, "https://script.google.com/macros/s/AKfycbx4yFkX37-CdaNCNAjW4PrN-X6-9TX8Tv0kbVDR2pzaSI_yXr1btKOSM98mGlhKLK4/exec");
+        }
         const SETTINGS_KEY = "absensi_system_settings_v1";
 
         const DEFAULT_SETTINGS = {
@@ -1067,6 +1071,29 @@
                 }
             };
 
+            const handleManualSync = async () => {
+                if (!localStorage.getItem(ENDPOINT_KEY)) {
+                    alert("URL Google Apps Script belum diset!");
+                    return;
+                }
+                if (!confirm("Kirim SEMUA data karyawan lokal ke Google Sheet?")) return;
+                
+                setSyncStatus("Sedang menyinkronkan...");
+                try {
+                    const res = await pushEmployeesToSheet(employees);
+                    if (res.ok) {
+                        alert("Berhasil sinkron ke Google Sheet!");
+                        setSyncStatus("Sinkronisasi Berhasil");
+                    } else {
+                        alert("Gagal sinkron: " + (res.reason || "Unknown error"));
+                        setSyncStatus("Gagal sinkron");
+                    }
+                } catch (e) {
+                    alert("Error: " + e.message);
+                }
+                setTimeout(() => setSyncStatus(""), 3000);
+            };
+
             const handlePhotoUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
@@ -1156,6 +1183,7 @@
                             onChange: handleImportEmployees 
                         }),
                         React.createElement("button", { onClick: exportEmployeesExcel, className: "bg-teal-600 text-white px-4 py-2 rounded-lg hover:bg-teal-700 text-sm" }, "📤 Export"),
+                        React.createElement("button", { onClick: handleManualSync, className: "bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm" }, "☁️ Sync Cloud"),
                         React.createElement("button", { onClick: handleReset, className: "bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 text-sm" }, "↺ Reset"),
                         React.createElement("button", { onClick: () => openModal(), className: "bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm" }, "+ Tambah")
                     )

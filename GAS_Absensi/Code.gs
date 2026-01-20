@@ -1,4 +1,26 @@
 function doGet(e) {
+  var action = e && e.parameter && e.parameter.action ? e.parameter.action : '';
+  var callback = e && e.parameter && e.parameter.callback ? e.parameter.callback : '';
+
+  if (action === 'export') {
+    var employees = getSheetRows('Employees');
+    var attendance = getSheetRows('Attendance');
+    var settings = getSettings();
+    var result = {
+      status: 'success',
+      employees: employees,
+      attendance: attendance,
+      settings: settings,
+      serverTime: new Date().toISOString()
+    };
+    var json = JSON.stringify(result);
+    if (callback) {
+      return ContentService.createTextOutput(callback + '(' + json + ')').setMimeType(ContentService.MimeType.JAVASCRIPT);
+    } else {
+      return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   ensureAllSheets('safe');
   ensureFolder('Absensi_Photos');
   ensureFolder('Absensi_Exports');

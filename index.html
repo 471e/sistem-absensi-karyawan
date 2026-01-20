@@ -253,6 +253,10 @@
         }
 
         const ENDPOINT_KEY = "absensi_endpoint_v1";
+        // Auto-set default endpoint if not present
+        if (!localStorage.getItem(ENDPOINT_KEY)) {
+            localStorage.setItem(ENDPOINT_KEY, "https://script.google.com/macros/s/AKfycbx4yFkX37-CdaNCNAjW4PrN-X6-9TX8Tv0kbVDR2pzaSI_yXr1btKOSM98mGlhKLK4/exec");
+        }
         const SETTINGS_KEY = "absensi_system_settings_v1";
 
         const DEFAULT_SETTINGS = {
